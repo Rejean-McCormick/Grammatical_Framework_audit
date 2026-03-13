@@ -1,0 +1,22 @@
+{
+  "selected_mode": "file",
+  "selected_target_file": "C:/mycode/Grammatical_Framework/Grammatical_Framework-Albanian/AlbanianSQI/GF/lib/src/albanian/StructuralSqi.gf",
+  "selected_project_root": "C:\\mycode\\Grammatical_Framework\\Grammatical_Framework-Albanian\\AlbanianSQI\\GF",
+  "selected_rgl_root": "C:\\mycode\\Grammatical_Framework\\gf-rgl\\src",
+  "selected_gf_exe": "C:\\mycode\\Grammatical_Framework\\gf-3.12-windows\\gf.exe",
+  "selected_out_root": "C:\\mycode\\Grammatical_Framework\\gf-audit",
+  "selected_scan_dir": "lib/src/albanian",
+  "selected_scan_glob": "*.gf",
+  "selected_timeout_sec": 60,
+  "selected_include_regex": "^[A-Z][A-Za-z0-9_]*\\.gf$",
+  "selected_exclude_regex": "( - Copie\\.gf$|\\.bak\\.gf$|\\.tmp\\.gf$|\\.disabled\\.gf$|\\s)",
+  "selected_keep_ok_details": true,
+  "selected_diff_previous": false,
+  "selected_skip_version_probe": false,
+  "selected_no_compile": true,
+  "selected_emit_cpu_stats": false,
+  "is_running": false,
+  "last_run_dir": null,
+  "last_summary_path": null,
+  "status_message": "Audit failed."
+}

@@ -122,7 +122,37 @@ def _coerce_target_file(value: str | os.PathLike[str] | Path | None) -> str | No
     return text or None
 
 
-def _build_default_state() -> dict[str, Any]:
+def _coerce_mode(value: Any, default: str = _MODE_ALL) -> str:
+    normalized = _normalize_str(str(value) if value is not None else "").lower() or default
+    return normalized if normalized in _ALLOWED_MODES else default
+
+
+def _coerce_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return bool(value)
+
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y", "on"}:
+        return True
+    if text in {"0", "false", "no", "n", "off", ""}:
+        return False
+    return default
+
+
+def _build_default_state(app_config: AppConfig | None = None) -> dict[str, Any]:
+    app_config = app_config or build_app_config()
+
     return {
         "selected_mode": _MODE_ALL,
         "selected_target_file": None,
@@ -130,6 +160,24 @@ def _build_default_state() -> dict[str, Any]:
         "selected_rgl_root": None,
         "selected_gf_exe": None,
         "selected_out_root": None,
+        "selected_scan_dir": getattr(app_config, "default_scan_dir", "lib/src/albanian"),
+        "selected_scan_glob": getattr(app_config, "default_scan_glob", "*.gf"),
+        "selected_timeout_sec": int(getattr(app_config, "default_timeout_sec", 60)),
+        "selected_include_regex": getattr(
+            app_config,
+            "default_include_regex",
+            r"^[A-Z][A-Za-z0-9_]*\.gf$",
+        ),
+        "selected_exclude_regex": getattr(
+            app_config,
+            "default_exclude_regex",
+            r"( - Copie\.gf$|\.bak\.gf$|\.tmp\.gf$|\.disabled\.gf$|\s)",
+        ),
+        "selected_keep_ok_details": bool(getattr(app_config, "default_keep_ok_details", False)),
+        "selected_diff_previous": bool(getattr(app_config, "default_diff_previous", True)),
+        "selected_skip_version_probe": bool(getattr(app_config, "default_skip_version_probe", False)),
+        "selected_no_compile": bool(getattr(app_config, "default_no_compile", False)),
+        "selected_emit_cpu_stats": bool(getattr(app_config, "default_emit_cpu_stats", False)),
         "is_running": False,
         "last_run_dir": None,
         "last_summary_path": None,
@@ -397,22 +445,52 @@ def load_app_state(
     Only simple scalar/path fields are persisted. Runtime-only objects such as
     current_run_config and current_run_result are reset on load.
     """
+    app_config = app_config or build_app_config()
     path = _get_state_path(state_path, app_config=app_config)
     payload = _read_json(path)
 
-    state = _build_default_state()
+    state = _build_default_state(app_config)
+
     state.update(
         {
-            "selected_mode": payload.get("selected_mode", state["selected_mode"]),
-            "selected_target_file": payload.get("selected_target_file"),
-            "selected_project_root": payload.get("selected_project_root"),
-            "selected_rgl_root": payload.get("selected_rgl_root"),
-            "selected_gf_exe": payload.get("selected_gf_exe"),
-            "selected_out_root": payload.get("selected_out_root"),
+            "selected_mode": _coerce_mode(payload.get("selected_mode"), state["selected_mode"]),
+            "selected_target_file": _coerce_target_file(payload.get("selected_target_file")),
+            "selected_project_root": _normalize_path(payload.get("selected_project_root")),
+            "selected_rgl_root": _normalize_path(payload.get("selected_rgl_root")),
+            "selected_gf_exe": _normalize_path(payload.get("selected_gf_exe")),
+            "selected_out_root": _normalize_path(payload.get("selected_out_root")),
+            "selected_scan_dir": _normalize_str(payload.get("selected_scan_dir")) or state["selected_scan_dir"],
+            "selected_scan_glob": _normalize_str(payload.get("selected_scan_glob")) or state["selected_scan_glob"],
+            "selected_timeout_sec": _coerce_int(
+                payload.get("selected_timeout_sec"),
+                state["selected_timeout_sec"],
+            ),
+            "selected_include_regex": _normalize_str(payload.get("selected_include_regex")) or state["selected_include_regex"],
+            "selected_exclude_regex": _normalize_str(payload.get("selected_exclude_regex")) or state["selected_exclude_regex"],
+            "selected_keep_ok_details": _coerce_bool(
+                payload.get("selected_keep_ok_details"),
+                state["selected_keep_ok_details"],
+            ),
+            "selected_diff_previous": _coerce_bool(
+                payload.get("selected_diff_previous"),
+                state["selected_diff_previous"],
+            ),
+            "selected_skip_version_probe": _coerce_bool(
+                payload.get("selected_skip_version_probe"),
+                state["selected_skip_version_probe"],
+            ),
+            "selected_no_compile": _coerce_bool(
+                payload.get("selected_no_compile"),
+                state["selected_no_compile"],
+            ),
+            "selected_emit_cpu_stats": _coerce_bool(
+                payload.get("selected_emit_cpu_stats"),
+                state["selected_emit_cpu_stats"],
+            ),
             "is_running": False,
-            "last_run_dir": payload.get("last_run_dir"),
-            "last_summary_path": payload.get("last_summary_path"),
-            "status_message": payload.get("status_message", ""),
+            "last_run_dir": _normalize_path(payload.get("last_run_dir")),
+            "last_summary_path": _normalize_path(payload.get("last_summary_path")),
+            "status_message": _normalize_str(payload.get("status_message")),
             "current_run_config": None,
             "current_run_result": None,
         }
@@ -432,16 +510,26 @@ def save_app_state(
     path = _get_state_path(state_path, app_config=app_config)
 
     payload = {
-        "selected_mode": app_state.get("selected_mode", _MODE_ALL),
-        "selected_target_file": app_state.get("selected_target_file"),
-        "selected_project_root": app_state.get("selected_project_root"),
-        "selected_rgl_root": app_state.get("selected_rgl_root"),
-        "selected_gf_exe": app_state.get("selected_gf_exe"),
-        "selected_out_root": app_state.get("selected_out_root"),
+        "selected_mode": _coerce_mode(app_state.get("selected_mode"), _MODE_ALL),
+        "selected_target_file": _coerce_target_file(app_state.get("selected_target_file")),
+        "selected_project_root": _serialize_path(_normalize_path(app_state.get("selected_project_root"))),
+        "selected_rgl_root": _serialize_path(_normalize_path(app_state.get("selected_rgl_root"))),
+        "selected_gf_exe": _serialize_path(_normalize_path(app_state.get("selected_gf_exe"))),
+        "selected_out_root": _serialize_path(_normalize_path(app_state.get("selected_out_root"))),
+        "selected_scan_dir": _normalize_str(app_state.get("selected_scan_dir")),
+        "selected_scan_glob": _normalize_str(app_state.get("selected_scan_glob")),
+        "selected_timeout_sec": _coerce_int(app_state.get("selected_timeout_sec"), 60),
+        "selected_include_regex": _normalize_str(app_state.get("selected_include_regex")),
+        "selected_exclude_regex": _normalize_str(app_state.get("selected_exclude_regex")),
+        "selected_keep_ok_details": _coerce_bool(app_state.get("selected_keep_ok_details"), False),
+        "selected_diff_previous": _coerce_bool(app_state.get("selected_diff_previous"), True),
+        "selected_skip_version_probe": _coerce_bool(app_state.get("selected_skip_version_probe"), False),
+        "selected_no_compile": _coerce_bool(app_state.get("selected_no_compile"), False),
+        "selected_emit_cpu_stats": _coerce_bool(app_state.get("selected_emit_cpu_stats"), False),
         "is_running": False,
-        "last_run_dir": app_state.get("last_run_dir"),
-        "last_summary_path": app_state.get("last_summary_path"),
-        "status_message": app_state.get("status_message", ""),
+        "last_run_dir": _serialize_path(_normalize_path(app_state.get("last_run_dir"))),
+        "last_summary_path": _serialize_path(_normalize_path(app_state.get("last_summary_path"))),
+        "status_message": _normalize_str(app_state.get("status_message")),
     }
 
     return _write_json_atomic(path, payload)
@@ -506,4 +594,3 @@ __all__ = [
     "serialize_run_config",
     "serialize_run_paths",
 ]
-

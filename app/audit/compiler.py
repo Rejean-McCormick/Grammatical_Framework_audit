@@ -3,31 +3,24 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable
 
-try:
-    from ..models import CompileSummary, RunConfig, RunPaths
-    from ..utils.gf_utils import parse_compile_summary
-    from ..utils.io_utils import ensure_dir, write_text
-    from ..utils.path_utils import relative_to_project_root, safe_name
-    from ..utils.process_utils import run_process_with_timeout
-except ImportError:  # pragma: no cover
-    from models import CompileSummary, RunConfig, RunPaths
-    from utils.gf_utils import parse_compile_summary
-    from utils.io_utils import ensure_dir, write_text
-    from utils.path_utils import relative_to_project_root, safe_name
-    from utils.process_utils import run_process_with_timeout
+from ..models import CompileSummary, RunConfig, RunPaths
+from ..utils.gf_utils import parse_compile_summary
+from ..utils.io_utils import ensure_dir, write_text
+from ..utils.path_utils import relative_to_project_root, safe_name
+from ..utils.process_utils import run_process_with_timeout
 
 
 def probe_gf_version(run_config: RunConfig, run_paths: RunPaths) -> str:
-    version_stdout_path = run_paths.raw_dir / "gf_version.out.txt"
-    version_stderr_path = run_paths.raw_dir / "gf_version.err.txt"
+    version_stdout_path = Path(run_paths.raw_dir) / "gf_version.out.txt"
+    version_stderr_path = Path(run_paths.raw_dir) / "gf_version.err.txt"
 
     ensure_dir(version_stdout_path.parent)
     ensure_dir(version_stderr_path.parent)
 
     result = run_process_with_timeout(
-        exe_path=Path(run_config.gf_exe),
-        arg_list=["--version"],
-        work_dir=Path(run_config.project_root),
+        executable=Path(run_config.gf_exe),
+        args=["--version"],
+        cwd=Path(run_config.project_root),
         stdout_path=version_stdout_path,
         stderr_path=version_stderr_path,
         timeout_sec=10,
@@ -59,7 +52,7 @@ def build_gf_args(file_path: Path, run_config: RunConfig, run_paths: RunPaths) -
         f"--output-dir={Path(run_paths.out_dir)}",
     ]
 
-    if getattr(run_config, "emit_cpu_stats", False):
+    if bool(run_config.emit_cpu_stats):
         compile_args.append("--cpu")
 
     compile_args.append(str(file_path))
@@ -77,7 +70,7 @@ def compile_file(file_path: Path, run_config: RunConfig, run_paths: RunPaths) ->
     stdout_path = compile_logs_dir / f"{safe_file_name}.out.txt"
     stderr_path = compile_logs_dir / f"{safe_file_name}.err.txt"
 
-    if getattr(run_config, "no_compile", False):
+    if bool(run_config.no_compile):
         write_text(stdout_path, "", encoding="utf-8")
         write_text(stderr_path, "", encoding="utf-8")
         return CompileSummary(
@@ -86,7 +79,7 @@ def compile_file(file_path: Path, run_config: RunConfig, run_paths: RunPaths) ->
             duration_ms=0,
             error_kind="OK",
             first_error="",
-            error_detail="",
+            error_detail="compile skipped (-no-compile)",
             stdout_path=stdout_path,
             stderr_path=stderr_path,
         )
@@ -94,9 +87,9 @@ def compile_file(file_path: Path, run_config: RunConfig, run_paths: RunPaths) ->
     compile_args = build_gf_args(file_path, run_config, run_paths)
 
     process_result = run_process_with_timeout(
-        exe_path=Path(run_config.gf_exe),
-        arg_list=compile_args,
-        work_dir=Path(run_config.project_root),
+        executable=Path(run_config.gf_exe),
+        args=compile_args,
+        cwd=Path(run_config.project_root),
         stdout_path=stdout_path,
         stderr_path=stderr_path,
         timeout_sec=int(run_config.timeout_sec),
@@ -106,7 +99,7 @@ def compile_file(file_path: Path, run_config: RunConfig, run_paths: RunPaths) ->
     stderr_text = _read_if_exists(stderr_path)
     combined_text = _combine_output(stdout_text, stderr_text)
 
-    error_kind, first_error, error_detail = parse_compile_summary(
+    parsed_summary = parse_compile_summary(
         combined_text=combined_text,
         timed_out=process_result.timed_out,
         exit_code=process_result.exit_code,
@@ -116,18 +109,18 @@ def compile_file(file_path: Path, run_config: RunConfig, run_paths: RunPaths) ->
         exit_code=process_result.exit_code,
         timed_out=process_result.timed_out,
         duration_ms=process_result.duration_ms,
-        error_kind=error_kind,
-        first_error=first_error,
-        error_detail=error_detail,
+        error_kind=parsed_summary.error_kind,
+        first_error=parsed_summary.first_error,
+        error_detail=parsed_summary.error_detail,
         stdout_path=stdout_path,
         stderr_path=stderr_path,
     )
 
 
 def _resolve_gf_path(run_config: RunConfig) -> str:
-    configured_gf_path = getattr(run_config, "gf_path", "")
-    if configured_gf_path and str(configured_gf_path).strip():
-        return str(configured_gf_path).strip()
+    configured_gf_path = str(run_config.gf_path).strip()
+    if configured_gf_path:
+        return configured_gf_path
 
     rgl_root = Path(run_config.rgl_root)
     detected_rgl_parts = _detect_existing_rgl_subdirs(
@@ -135,7 +128,7 @@ def _resolve_gf_path(run_config: RunConfig) -> str:
         ["present", "alltenses", "common", "abstract", "prelude", "compat", "api"],
     )
 
-    gf_path_parts = ["lib/src", str(getattr(run_config, "scan_dir", "lib/src/albanian")).strip()]
+    gf_path_parts = ["lib/src", str(run_config.scan_dir).strip()]
     gf_path_parts.extend(detected_rgl_parts)
 
     return ":".join(_deduplicate_preserving_order(gf_path_parts))

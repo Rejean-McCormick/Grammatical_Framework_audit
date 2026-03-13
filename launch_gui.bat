@@ -5,13 +5,22 @@ REM ==================================================
 REM gf-audit GUI launcher
 REM
 REM Optional environment variables:
-REM   GF_AUDIT_DEBUG_CONSOLE=1   -> force python.exe instead of pythonw.exe
+REM   GF_AUDIT_DEBUG_CONSOLE=1   -> force console mode
 REM   GF_AUDIT_PYTHON=<path>     -> explicit Python interpreter
+REM
+REM Resolution order:
+REM   1) GF_AUDIT_PYTHON environment variable
+REM   2) .venv\Scripts\pythonw.exe / python.exe
+REM   3) uv run against this project
+REM   4) pyw / pythonw on PATH
+REM   5) py / python on PATH
 REM ==================================================
 
 for %%I in ("%~dp0.") do set "APP_ROOT=%%~fI"
 set "APP_MAIN=%APP_ROOT%\app\main_gui.py"
 set "VENV_DIR=%APP_ROOT%\.venv"
+set "VENV_PYTHONW=%VENV_DIR%\Scripts\pythonw.exe"
+set "VENV_PYTHON=%VENV_DIR%\Scripts\python.exe"
 
 set "PYTHONUTF8=1"
 if defined PYTHONPATH (
@@ -30,6 +39,7 @@ if not exist "%APP_MAIN%" (
 set "PY_CMD="
 set "PY_ARGS="
 set "LAUNCH_MODE=windowed"
+set "USE_UV=0"
 
 REM ---- explicit override ----
 if defined GF_AUDIT_PYTHON (
@@ -47,12 +57,19 @@ if defined GF_AUDIT_PYTHON (
 REM ---- debug mode keeps console visible ----
 if /I "%GF_AUDIT_DEBUG_CONSOLE%"=="1" (
   set "LAUNCH_MODE=console"
-  goto resolve_console_python
+  goto resolve_console_runtime
 )
 
-REM ---- prefer venv pythonw for GUI ----
-if exist "%VENV_DIR%\Scripts\pythonw.exe" (
-  set "PY_CMD=%VENV_DIR%\Scripts\pythonw.exe"
+REM ---- prefer repo-local venv pythonw for GUI ----
+if exist "%VENV_PYTHONW%" (
+  set "PY_CMD=%VENV_PYTHONW%"
+  goto launch
+)
+
+REM ---- uv project launcher before global Python ----
+where uv >nul 2>&1
+if not errorlevel 1 (
+  set "USE_UV=1"
   goto launch
 )
 
@@ -74,9 +91,15 @@ if not errorlevel 1 (
 REM ---- last resort: console Python ----
 set "LAUNCH_MODE=console"
 
-:resolve_console_python
-if exist "%VENV_DIR%\Scripts\python.exe" (
-  set "PY_CMD=%VENV_DIR%\Scripts\python.exe"
+:resolve_console_runtime
+if exist "%VENV_PYTHON%" (
+  set "PY_CMD=%VENV_PYTHON%"
+  goto launch
+)
+
+where uv >nul 2>&1
+if not errorlevel 1 (
+  set "USE_UV=1"
   goto launch
 )
 
@@ -94,14 +117,35 @@ if not errorlevel 1 (
 )
 
 echo ERROR: No suitable Python interpreter found.
-echo Install Python 3 or create a local .venv in:
-echo   %VENV_DIR%
+echo.
+echo Expected one of:
+echo   - GF_AUDIT_PYTHON environment variable
+echo   - %VENV_PYTHONW% or %VENV_PYTHON%
+echo   - uv on PATH
+echo   - pyw / pythonw on PATH
+echo   - py / python on PATH
 pause
 exit /b 2
 
 :launch
+if /I "%USE_UV%"=="1" (
+  if /I "%LAUNCH_MODE%"=="console" (
+    uv run --directory "%APP_ROOT%" python -X utf8 -m app.main_gui %*
+    set "RC=%ERRORLEVEL%"
+    if not "%RC%"=="0" (
+      echo.
+      echo GUI exited with code %RC%.
+      pause
+    )
+    exit /b %RC%
+  ) else (
+    uv run --directory "%APP_ROOT%" pythonw.exe -X utf8 -m app.main_gui %*
+    exit /b %ERRORLEVEL%
+  )
+)
+
 if /I "%LAUNCH_MODE%"=="console" (
-  "%PY_CMD%" %PY_ARGS% "%APP_MAIN%"
+  "%PY_CMD%" %PY_ARGS% "%APP_MAIN%" %*
   set "RC=%ERRORLEVEL%"
   if not "%RC%"=="0" (
     echo.
@@ -110,6 +154,6 @@ if /I "%LAUNCH_MODE%"=="console" (
   )
   exit /b %RC%
 ) else (
-  "%PY_CMD%" %PY_ARGS% "%APP_MAIN%"
+  "%PY_CMD%" %PY_ARGS% "%APP_MAIN%" %*
   exit /b %ERRORLEVEL%
 )

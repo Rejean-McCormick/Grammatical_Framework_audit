@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, Optional
 import traceback
+from pathlib import Path
+from typing import Any
 
-from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
+from PySide6.QtCore import QObject, QThread, Qt, QUrl, Signal, Slot
+from PySide6.QtGui import QCloseEvent, QDesktopServices
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QFileDialog,
     QFormLayout,
     QGridLayout,
     QGroupBox,
@@ -25,16 +27,6 @@ from PySide6.QtWidgets import (
 
 from ..bootstrap import build_run_config
 from ..models import AppConfig, RunConfig
-from .dialogs import (
-    confirm_run,
-    pick_gf_exe,
-    pick_out_root,
-    pick_project_root,
-    pick_rgl_root,
-    pick_target_file,
-    show_error_dialog,
-    show_info_dialog,
-)
 from .validators import validate_run_config
 
 
@@ -65,8 +57,8 @@ class MainWindow(QMainWindow):
         self.app_config = app_config
         self.app_state = app_state
 
-        self.worker_thread: Optional[QThread] = None
-        self.worker: Optional[AuditWorker] = None
+        self.worker_thread: QThread | None = None
+        self.worker: AuditWorker | None = None
 
         self.setWindowTitle(f"{self.app_config.app_name} {self.app_config.app_version}")
         self.resize(1100, 760)
@@ -75,7 +67,7 @@ class MainWindow(QMainWindow):
         self._load_state_into_widgets()
         self._connect_signals()
         self._on_mode_changed(self.mode_var.currentText())
-        self._update_status("Ready.")
+        self._update_status(self._state_get("status_message", "Ready.") or "Ready.")
 
     def _build_ui(self) -> None:
         root = QWidget(self)
@@ -90,7 +82,7 @@ class MainWindow(QMainWindow):
 
         paths_group = QGroupBox("Paths", config_group)
         paths_layout = QFormLayout(paths_group)
-        paths_layout.setLabelAlignment(Qt.AlignRight)
+        paths_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
         self.project_root_var = QLineEdit(paths_group)
         self.rgl_root_var = QLineEdit(paths_group)
@@ -116,7 +108,7 @@ class MainWindow(QMainWindow):
 
         options_group = QGroupBox("Options", config_group)
         options_layout = QFormLayout(options_group)
-        options_layout.setLabelAlignment(Qt.AlignRight)
+        options_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
         self.mode_var = QComboBox(options_group)
         self.mode_var.addItems(["all", "file"])
@@ -164,7 +156,7 @@ class MainWindow(QMainWindow):
         output_layout = QVBoxLayout(output_group)
 
         self.status_message_var = QLabel(output_group)
-        self.status_message_var.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.status_message_var.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
 
         self.output_log = QPlainTextEdit(output_group)
         self.output_log.setReadOnly(True)
@@ -180,15 +172,34 @@ class MainWindow(QMainWindow):
 
     def _connect_signals(self) -> None:
         self.mode_var.currentTextChanged.connect(self._on_mode_changed)
+
         self.project_root_browse_button.clicked.connect(self._browse_project_root)
         self.rgl_root_browse_button.clicked.connect(self._browse_rgl_root)
         self.gf_exe_browse_button.clicked.connect(self._browse_gf_exe)
         self.out_root_browse_button.clicked.connect(self._browse_out_root)
         self.target_file_browse_button.clicked.connect(self._browse_target_file)
+
         self.run_button.clicked.connect(self._on_run_clicked)
         self.open_last_run_button.clicked.connect(self._open_last_run)
         self.open_summary_button.clicked.connect(self._open_last_summary)
         self.clear_log_button.clicked.connect(self.output_log.clear)
+
+        self.mode_var.currentTextChanged.connect(lambda *_: self._sync_state_from_widgets())
+        self.project_root_var.textChanged.connect(lambda *_: self._sync_state_from_widgets())
+        self.rgl_root_var.textChanged.connect(lambda *_: self._sync_state_from_widgets())
+        self.gf_exe_var.textChanged.connect(lambda *_: self._sync_state_from_widgets())
+        self.out_root_var.textChanged.connect(lambda *_: self._sync_state_from_widgets())
+        self.scan_dir_var.textChanged.connect(lambda *_: self._sync_state_from_widgets())
+        self.scan_glob_var.textChanged.connect(lambda *_: self._sync_state_from_widgets())
+        self.target_file_var.textChanged.connect(lambda *_: self._sync_state_from_widgets())
+        self.timeout_sec_var.valueChanged.connect(lambda *_: self._sync_state_from_widgets())
+        self.include_regex_var.textChanged.connect(lambda *_: self._sync_state_from_widgets())
+        self.exclude_regex_var.textChanged.connect(lambda *_: self._sync_state_from_widgets())
+        self.keep_ok_details_var.toggled.connect(lambda *_: self._sync_state_from_widgets())
+        self.diff_previous_var.toggled.connect(lambda *_: self._sync_state_from_widgets())
+        self.skip_version_probe_var.toggled.connect(lambda *_: self._sync_state_from_widgets())
+        self.no_compile_var.toggled.connect(lambda *_: self._sync_state_from_widgets())
+        self.emit_cpu_stats_var.toggled.connect(lambda *_: self._sync_state_from_widgets())
 
     def _with_button(self, widget: QWidget, button: QPushButton) -> QWidget:
         container = QWidget(self)
@@ -200,36 +211,70 @@ class MainWindow(QMainWindow):
         return container
 
     def _load_state_into_widgets(self) -> None:
-        self.project_root_var.setText(
-            self._state_get("selected_project_root", "")
-            or ""
+        self.project_root_var.setText(self._path_state_text("selected_project_root"))
+        self.rgl_root_var.setText(self._path_state_text("selected_rgl_root"))
+        self.gf_exe_var.setText(self._path_state_text("selected_gf_exe"))
+        self.out_root_var.setText(self._path_state_text("selected_out_root"))
+
+        self.scan_dir_var.setText(
+            self._state_text("selected_scan_dir", getattr(self.app_config, "default_scan_dir", "lib/src/albanian"))
         )
-        self.rgl_root_var.setText(
-            self._state_get("selected_rgl_root", "")
-            or ""
-        )
-        self.gf_exe_var.setText(
-            self._state_get("selected_gf_exe", "")
-            or ""
-        )
-        self.out_root_var.setText(
-            self._state_get("selected_out_root", "")
-            or ""
+        self.scan_glob_var.setText(
+            self._state_text("selected_scan_glob", getattr(self.app_config, "default_scan_glob", "*.gf"))
         )
 
-        self.scan_dir_var.setText(getattr(self.app_config, "default_scan_dir", "lib/src/albanian"))
-        self.scan_glob_var.setText(getattr(self.app_config, "default_scan_glob", "*.gf"))
+        self.mode_var.setCurrentText(self._state_text("selected_mode", "all") or "all")
+        self.target_file_var.setText(self._state_text("selected_target_file", ""))
 
-        self.mode_var.setCurrentText(self._state_get("selected_mode", "all") or "all")
-        self.target_file_var.setText(self._state_get("selected_target_file", "") or "")
-        self.timeout_sec_var.setValue(int(getattr(self.app_config, "default_timeout_sec", 60)))
-        self.include_regex_var.setText(getattr(self.app_config, "default_include_regex", "^[A-Z][A-Za-z0-9_]*\\.gf$"))
-        self.exclude_regex_var.setText(getattr(self.app_config, "default_exclude_regex", "( - Copie\\.gf$|\\.bak\\.gf$|\\.tmp\\.gf$|\\.disabled\\.gf$|\\s)"))
-        self.keep_ok_details_var.setChecked(bool(getattr(self.app_config, "default_keep_ok_details", False)))
-        self.diff_previous_var.setChecked(bool(getattr(self.app_config, "default_diff_previous", True)))
-        self.skip_version_probe_var.setChecked(bool(getattr(self.app_config, "default_skip_version_probe", False)))
-        self.no_compile_var.setChecked(bool(getattr(self.app_config, "default_no_compile", False)))
-        self.emit_cpu_stats_var.setChecked(bool(getattr(self.app_config, "default_emit_cpu_stats", False)))
+        self.timeout_sec_var.setValue(
+            self._state_int("selected_timeout_sec", int(getattr(self.app_config, "default_timeout_sec", 60)))
+        )
+        self.include_regex_var.setText(
+            self._state_text(
+                "selected_include_regex",
+                getattr(self.app_config, "default_include_regex", r"^[A-Z][A-Za-z0-9_]*\.gf$"),
+            )
+        )
+        self.exclude_regex_var.setText(
+            self._state_text(
+                "selected_exclude_regex",
+                getattr(
+                    self.app_config,
+                    "default_exclude_regex",
+                    r"( - Copie\.gf$|\.bak\.gf$|\.tmp\.gf$|\.disabled\.gf$|\s)",
+                ),
+            )
+        )
+        self.keep_ok_details_var.setChecked(
+            self._state_bool(
+                "selected_keep_ok_details",
+                bool(getattr(self.app_config, "default_keep_ok_details", False)),
+            )
+        )
+        self.diff_previous_var.setChecked(
+            self._state_bool(
+                "selected_diff_previous",
+                bool(getattr(self.app_config, "default_diff_previous", True)),
+            )
+        )
+        self.skip_version_probe_var.setChecked(
+            self._state_bool(
+                "selected_skip_version_probe",
+                bool(getattr(self.app_config, "default_skip_version_probe", False)),
+            )
+        )
+        self.no_compile_var.setChecked(
+            self._state_bool(
+                "selected_no_compile",
+                bool(getattr(self.app_config, "default_no_compile", False)),
+            )
+        )
+        self.emit_cpu_stats_var.setChecked(
+            self._state_bool(
+                "selected_emit_cpu_stats",
+                bool(getattr(self.app_config, "default_emit_cpu_stats", False)),
+            )
+        )
 
     def _state_get(self, key: str, default: Any = None) -> Any:
         if isinstance(self.app_state, dict):
@@ -239,51 +284,157 @@ class MainWindow(QMainWindow):
     def _state_set(self, key: str, value: Any) -> None:
         if isinstance(self.app_state, dict):
             self.app_state[key] = value
-        else:
-            setattr(self.app_state, key, value)
+            return
+        setattr(self.app_state, key, value)
+
+    def _state_text(self, key: str, default: str = "") -> str:
+        value = self._state_get(key, default)
+        if value is None:
+            return default
+        return str(value)
+
+    def _state_int(self, key: str, default: int) -> int:
+        value = self._state_get(key, default)
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _state_bool(self, key: str, default: bool) -> bool:
+        value = self._state_get(key, default)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "on"}:
+                return True
+            if normalized in {"0", "false", "no", "off"}:
+                return False
+        return bool(value)
+
+    def _path_state_text(self, key: str) -> str:
+        value = self._state_get(key, None)
+        return str(value) if value else ""
+
+    def _build_run_summary(self, run_config: RunConfig) -> str:
+        lines = [
+            f"Mode: {run_config.mode}",
+            f"Project root: {run_config.project_root}",
+            f"RGL root: {run_config.rgl_root}",
+            f"GF executable: {run_config.gf_exe}",
+            f"Output root: {run_config.out_root}",
+            f"Scan dir: {run_config.scan_dir}",
+            f"Scan glob: {run_config.scan_glob}",
+            f"Timeout: {run_config.timeout_sec}s",
+        ]
+        if run_config.mode == "file":
+            lines.append(f"Target file: {run_config.target_file}")
+        if run_config.no_compile:
+            lines.append("Compile: disabled")
+        return "\n".join(lines)
+
+    def _resolve_initial_dir(self, raw_text: str, fallback: Path | None = None) -> str:
+        text = (raw_text or "").strip()
+        if text:
+            candidate = Path(text).expanduser()
+            if candidate.is_file():
+                return str(candidate.parent)
+            return str(candidate)
+        if fallback is not None:
+            return str(fallback)
+        return str(Path.home())
+
+    def _choose_directory(self, title: str, current_text: str, fallback: Path | None = None) -> str:
+        start_dir = self._resolve_initial_dir(current_text, fallback=fallback)
+        return QFileDialog.getExistingDirectory(self, title, start_dir)
+
+    def _choose_file(self, title: str, current_text: str, file_filter: str, fallback: Path | None = None) -> str:
+        start_dir = self._resolve_initial_dir(current_text, fallback=fallback)
+        selected_file, _ = QFileDialog.getOpenFileName(self, title, start_dir, file_filter)
+        return selected_file
+
+    def _show_error(self, title: str, message: str, details: str = "") -> None:
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Critical)
+        box.setWindowTitle(title)
+        box.setText(message)
+        if details.strip():
+            box.setDetailedText(details)
+        box.exec()
+
+    def _show_info(self, title: str, message: str) -> None:
+        QMessageBox.information(self, title, message)
+
+    def _confirm_run(self, run_summary: str) -> bool:
+        message = "Start audit run?"
+        if run_summary.strip():
+            message = f"{message}\n\n{run_summary.strip()}"
+        result = QMessageBox.question(
+            self,
+            "Confirm audit run",
+            message,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        return result == QMessageBox.StandardButton.Yes
 
     @Slot(str)
     def _on_mode_changed(self, mode: str) -> None:
         is_file_mode = mode == "file"
-        self.target_file_var.setEnabled(is_file_mode)
-        self.target_file_browse_button.setEnabled(is_file_mode)
+        self.target_file_var.setEnabled(is_file_mode and not self._state_get("is_running", False))
+        self.target_file_browse_button.setEnabled(is_file_mode and not self._state_get("is_running", False))
         self._state_set("selected_mode", mode)
 
     @Slot()
     def _browse_project_root(self) -> None:
-        value = pick_project_root(parent=self, start_dir=self.project_root_var.text().strip() or None)
+        current = self.project_root_var.text().strip()
+        value = self._choose_directory("Select project root", current)
         if value:
-            self.project_root_var.setText(str(value))
-            self._state_set("selected_project_root", str(value))
+            self.project_root_var.setText(value)
+            self._state_set("selected_project_root", Path(value))
 
     @Slot()
     def _browse_rgl_root(self) -> None:
-        value = pick_rgl_root(parent=self, start_dir=self.rgl_root_var.text().strip() or None)
+        current = self.rgl_root_var.text().strip()
+        value = self._choose_directory("Select RGL root", current)
         if value:
-            self.rgl_root_var.setText(str(value))
-            self._state_set("selected_rgl_root", str(value))
+            self.rgl_root_var.setText(value)
+            self._state_set("selected_rgl_root", Path(value))
 
     @Slot()
     def _browse_gf_exe(self) -> None:
-        value = pick_gf_exe(parent=self, start_dir=self.gf_exe_var.text().strip() or None)
+        current = self.gf_exe_var.text().strip()
+        value = self._choose_file(
+            "Select GF executable",
+            current,
+            "Executables (*.exe);;All files (*)",
+        )
         if value:
-            self.gf_exe_var.setText(str(value))
-            self._state_set("selected_gf_exe", str(value))
+            self.gf_exe_var.setText(value)
+            self._state_set("selected_gf_exe", Path(value))
 
     @Slot()
     def _browse_out_root(self) -> None:
-        value = pick_out_root(parent=self, start_dir=self.out_root_var.text().strip() or None)
+        current = self.out_root_var.text().strip()
+        value = self._choose_directory("Select output root", current)
         if value:
-            self.out_root_var.setText(str(value))
-            self._state_set("selected_out_root", str(value))
+            self.out_root_var.setText(value)
+            self._state_set("selected_out_root", Path(value))
 
     @Slot()
     def _browse_target_file(self) -> None:
-        start_dir = self.project_root_var.text().strip() or None
-        value = pick_target_file(parent=self, start_dir=start_dir)
+        project_root_text = self.project_root_var.text().strip()
+        fallback = Path(project_root_text) if project_root_text else None
+        current = self.target_file_var.text().strip()
+        value = self._choose_file(
+            "Select target GF file",
+            current,
+            "GF files (*.gf);;All files (*)",
+            fallback=fallback,
+        )
         if value:
-            self.target_file_var.setText(str(value))
-            self._state_set("selected_target_file", str(value))
+            self.target_file_var.setText(value)
+            self._state_set("selected_target_file", value)
 
     def _collect_run_config(self) -> RunConfig:
         self._sync_state_from_widgets()
@@ -307,15 +458,39 @@ class MainWindow(QMainWindow):
             exclude_regex=self.exclude_regex_var.text().strip(),
             keep_ok_details=bool(self.keep_ok_details_var.isChecked()),
             diff_previous=bool(self.diff_previous_var.isChecked()),
+            app_config=self.app_config,
         )
 
     def _sync_state_from_widgets(self) -> None:
         self._state_set("selected_mode", self.mode_var.currentText().strip())
         self._state_set("selected_target_file", self.target_file_var.text().strip())
-        self._state_set("selected_project_root", self.project_root_var.text().strip())
-        self._state_set("selected_rgl_root", self.rgl_root_var.text().strip())
-        self._state_set("selected_gf_exe", self.gf_exe_var.text().strip())
-        self._state_set("selected_out_root", self.out_root_var.text().strip())
+        self._state_set(
+            "selected_project_root",
+            Path(self.project_root_var.text().strip()) if self.project_root_var.text().strip() else None,
+        )
+        self._state_set(
+            "selected_rgl_root",
+            Path(self.rgl_root_var.text().strip()) if self.rgl_root_var.text().strip() else None,
+        )
+        self._state_set(
+            "selected_gf_exe",
+            Path(self.gf_exe_var.text().strip()) if self.gf_exe_var.text().strip() else None,
+        )
+        self._state_set(
+            "selected_out_root",
+            Path(self.out_root_var.text().strip()) if self.out_root_var.text().strip() else None,
+        )
+
+        self._state_set("selected_scan_dir", self.scan_dir_var.text().strip())
+        self._state_set("selected_scan_glob", self.scan_glob_var.text().strip())
+        self._state_set("selected_timeout_sec", int(self.timeout_sec_var.value()))
+        self._state_set("selected_include_regex", self.include_regex_var.text().strip())
+        self._state_set("selected_exclude_regex", self.exclude_regex_var.text().strip())
+        self._state_set("selected_keep_ok_details", bool(self.keep_ok_details_var.isChecked()))
+        self._state_set("selected_diff_previous", bool(self.diff_previous_var.isChecked()))
+        self._state_set("selected_skip_version_probe", bool(self.skip_version_probe_var.isChecked()))
+        self._state_set("selected_no_compile", bool(self.no_compile_var.isChecked()))
+        self._state_set("selected_emit_cpu_stats", bool(self.emit_cpu_stats_var.isChecked()))
 
     def _set_running_ui(self, is_running: bool) -> None:
         self.run_button.setEnabled(not is_running)
@@ -355,14 +530,15 @@ class MainWindow(QMainWindow):
             run_config = self._collect_run_config()
             validation_errors = validate_run_config(run_config)
         except Exception as exc:
-            show_error_dialog(self, "Invalid configuration", str(exc))
+            self._show_error("Invalid configuration", str(exc))
             return
 
         if validation_errors:
-            show_error_dialog(self, "Validation failed", "\n".join(validation_errors))
+            self._show_error("Validation failed", "\n".join(validation_errors))
             return
 
-        if not confirm_run(self, run_config):
+        run_summary = self._build_run_summary(run_config)
+        if not self._confirm_run(run_summary):
             return
 
         self._start_audit(run_config)
@@ -371,7 +547,14 @@ class MainWindow(QMainWindow):
         self._set_running_ui(True)
         self._update_status("Running audit…")
         self._append_log("Starting audit run.")
-        self._state_set("current_run_config", run_config)
+
+        if hasattr(self.app_state, "begin_run"):
+            self.app_state.begin_run(run_config, status_message="Running audit…")
+        else:
+            self._state_set("current_run_config", run_config)
+            self._state_set("current_run_result", None)
+            self._state_set("last_run_dir", None)
+            self._state_set("last_summary_path", None)
 
         self.worker_thread = QThread(self)
         self.worker = AuditWorker(run_config)
@@ -389,14 +572,15 @@ class MainWindow(QMainWindow):
 
     @Slot(object)
     def _on_audit_finished(self, run_result: Any) -> None:
-        self._state_set("current_run_result", run_result)
-
-        run_paths = getattr(run_result, "run_paths", None)
-        last_run_dir = str(getattr(run_paths, "run_dir", "")) if run_paths else ""
-        last_summary_path = str(getattr(run_paths, "summary_json_path", "")) if run_paths else ""
-
-        self._state_set("last_run_dir", last_run_dir)
-        self._state_set("last_summary_path", last_summary_path)
+        if hasattr(self.app_state, "finish_run"):
+            self.app_state.finish_run(run_result, status_message="Audit completed.")
+        else:
+            self._state_set("current_run_result", run_result)
+            run_paths = getattr(run_result, "run_paths", None)
+            last_run_dir = str(getattr(run_paths, "run_dir", "")) if run_paths else ""
+            last_summary_path = str(getattr(run_paths, "summary_json_path", "")) if run_paths else ""
+            self._state_set("last_run_dir", last_run_dir)
+            self._state_set("last_summary_path", last_summary_path)
 
         self._set_running_ui(False)
         self._update_status("Audit completed.")
@@ -408,19 +592,23 @@ class MainWindow(QMainWindow):
         self._append_log(f"Files seen: {files_seen}")
         self._append_log(f"OK: {ok_count} | FAIL: {fail_count}")
 
-        show_info_dialog(
-            self,
+        self._show_info(
             "Run completed",
             f"Audit completed.\n\nFiles seen: {files_seen}\nOK: {ok_count}\nFAIL: {fail_count}",
         )
 
     @Slot(str)
     def _on_audit_failed(self, error_text: str) -> None:
+        if hasattr(self.app_state, "fail_run"):
+            self.app_state.fail_run("Audit failed.")
+        else:
+            self._state_set("is_running", False)
+
         self._set_running_ui(False)
         self._update_status("Audit failed.")
         self._append_log("Audit failed.")
         self._append_log(error_text)
-        show_error_dialog(self, "Audit failed", error_text)
+        self._show_error("Audit failed", "The audit run failed.", details=error_text)
 
     @Slot()
     def _cleanup_worker(self) -> None:
@@ -441,11 +629,8 @@ class MainWindow(QMainWindow):
 
         path = Path(last_run_dir)
         if not path.exists():
-            show_error_dialog(self, "Missing directory", f"Run directory not found:\n{path}")
+            self._show_error("Missing directory", f"Run directory not found:\n{path}")
             return
-
-        from PySide6.QtGui import QDesktopServices
-        from PySide6.QtCore import QUrl
 
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
@@ -458,11 +643,11 @@ class MainWindow(QMainWindow):
 
         path = Path(last_summary_path)
         if not path.exists():
-            show_error_dialog(self, "Missing file", f"Summary file not found:\n{path}")
+            self._show_error("Missing file", f"Summary file not found:\n{path}")
             return
-
-        from PySide6.QtGui import QDesktopServices
-        from PySide6.QtCore import QUrl
 
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
+    def closeEvent(self, event: QCloseEvent) -> None:
+        self._sync_state_from_widgets()
+        super().closeEvent(event)

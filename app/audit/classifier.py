@@ -29,30 +29,13 @@ def classify_file_results(file_results: list[FileResult]) -> list[FileResult]:
     if not file_results:
         return file_results
 
-    all_results_by_file = {_path_key(result.file_path): result for result in file_results}
-    all_results_by_module = {
-        _module_key(result.module_name or _module_name_from_path(result.file_path)): result
-        for result in file_results
-    }
-
     for file_result in file_results:
         _initialize_status(file_result)
 
-    failing_results = [result for result in file_results if result.status == STATUS_FAIL]
-    failing_results_by_file = {_path_key(result.file_path): result for result in failing_results}
-    failing_results_by_module = {
-        _module_key(result.module_name or _module_name_from_path(result.file_path)): result
-        for result in failing_results
-    }
-
     for file_result in file_results:
-        classify_single_result(
-            file_result=file_result,
-            all_results_by_file=all_results_by_file,
-            all_results_by_module=all_results_by_module,
-            failing_results_by_file=failing_results_by_file,
-            failing_results_by_module=failing_results_by_module,
-        )
+        classify_single_result(file_result, file_results)
+
+    failing_results_by_file, _ = _index_results(file_results, only_failing=True)
 
     for file_result in file_results:
         if file_result.diagnostic_class != DIAG_DOWNSTREAM:
@@ -67,10 +50,7 @@ def classify_file_results(file_results: list[FileResult]) -> list[FileResult]:
 
 def classify_single_result(
     file_result: FileResult,
-    all_results_by_file: Mapping[str, FileResult],
-    all_results_by_module: Mapping[str, FileResult],
-    failing_results_by_file: Mapping[str, FileResult],
-    failing_results_by_module: Mapping[str, FileResult],
+    file_results: list[FileResult],
 ) -> FileResult:
     _initialize_status(file_result)
 
@@ -86,16 +66,15 @@ def classify_single_result(
         file_result.blocked_by = []
         return file_result
 
+    all_results_by_file, all_results_by_module = _index_results(file_results, only_failing=False)
+    failing_results_by_file, failing_results_by_module = _index_results(file_results, only_failing=True)
+
     all_referenced_results = _resolve_referenced_results(
         file_result=file_result,
         results_by_file=all_results_by_file,
         results_by_module=all_results_by_module,
     )
-    blocked_by = resolve_blocked_by(
-        file_result=file_result,
-        failing_results_by_file=failing_results_by_file,
-        failing_results_by_module=failing_results_by_module,
-    )
+    blocked_by = resolve_blocked_by(file_result, file_results)
 
     self_path_key = _path_key(file_result.file_path)
     self_module_key = _module_key(file_result.module_name or _module_name_from_path(file_result.file_path))
@@ -116,10 +95,22 @@ def classify_single_result(
     if blocked_by:
         file_result.diagnostic_class = DIAG_DOWNSTREAM
         file_result.is_direct = False
-        file_result.blocked_by = blocked_by
+        file_result.blocked_by = _normalize_display_paths(blocked_by)
         return file_result
 
     if all_referenced_results:
+        referenced_failing = [
+            result
+            for result in all_referenced_results
+            if _path_key(result.file_path) in failing_results_by_file
+            or _module_key(result.module_name or _module_name_from_path(result.file_path)) in failing_results_by_module
+        ]
+        if referenced_failing:
+            file_result.diagnostic_class = DIAG_DOWNSTREAM
+            file_result.is_direct = False
+            file_result.blocked_by = _normalize_display_paths([result.file_path for result in referenced_failing])
+            return file_result
+
         file_result.diagnostic_class = DIAG_AMBIGUOUS
         file_result.is_direct = False
         file_result.blocked_by = []
@@ -139,12 +130,13 @@ def classify_single_result(
 
 def resolve_blocked_by(
     file_result: FileResult,
-    failing_results_by_file: Mapping[str, FileResult],
-    failing_results_by_module: Mapping[str, FileResult],
+    file_results: list[FileResult],
 ) -> list[str]:
     first_error = _get_first_error(file_result)
     if not first_error:
         return []
+
+    failing_results_by_file, failing_results_by_module = _index_results(file_results, only_failing=True)
 
     self_path_key = _path_key(file_result.file_path)
     self_module_key = _module_key(file_result.module_name or _module_name_from_path(file_result.file_path))
@@ -175,6 +167,29 @@ def resolve_blocked_by(
         blocked_by.append(canonical_path)
 
     return blocked_by
+
+
+def _index_results(
+    file_results: Iterable[FileResult],
+    *,
+    only_failing: bool,
+) -> tuple[dict[str, FileResult], dict[str, FileResult]]:
+    by_file: dict[str, FileResult] = {}
+    by_module: dict[str, FileResult] = {}
+
+    for result in file_results:
+        if only_failing and getattr(result, "status", "") != STATUS_FAIL:
+            continue
+
+        file_key = _path_key(result.file_path)
+        module_key = _module_key(result.module_name or _module_name_from_path(result.file_path))
+
+        if file_key and file_key not in by_file:
+            by_file[file_key] = result
+        if module_key and module_key not in by_module:
+            by_module[module_key] = result
+
+    return by_file, by_module
 
 
 def _initialize_status(file_result: FileResult) -> None:
@@ -279,6 +294,20 @@ def _collect_direct_roots(
     return roots
 
 
+def _normalize_display_paths(values: Iterable[object]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+
+    for value in values:
+        display_value = _display_path(value)
+        if not display_value or display_value in seen:
+            continue
+        seen.add(display_value)
+        normalized.append(display_value)
+
+    return normalized
+
+
 def _extract_file_refs(text: str) -> list[str]:
     refs: list[str] = []
     seen: set[str] = set()
@@ -330,3 +359,4 @@ def _module_key(value: object) -> str:
 
 def _module_name_from_path(file_path: object) -> str:
     return Path(str(file_path)).stem if file_path is not None else ""
+

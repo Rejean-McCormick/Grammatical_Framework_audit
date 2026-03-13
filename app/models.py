@@ -1,4 +1,3 @@
-```python
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, fields, is_dataclass
@@ -6,10 +5,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, TypeVar, get_args
 
+
 Status = Literal["OK", "FAIL", "SKIPPED"]
 DiagnosticClass = Literal["ok", "direct", "downstream", "ambiguous", "noise", "skipped"]
 ErrorKind = Literal["OK", "OTHER", "TYPE", "SYNTAX", "INTERNAL", "TIMEOUT", "SCRIPT"]
 ChangeKind = Literal["unchanged", "improved", "regressed", "new", "removed"]
+Mode = Literal["all", "file"]
 
 
 def utc_now() -> datetime:
@@ -23,6 +24,31 @@ def _coerce_path(value: Any) -> Path:
     if isinstance(value, Path):
         return value
     return Path(value)
+
+
+def _coerce_optional_path(value: Any) -> Path | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    return Path(text)
+
+
+def _coerce_target_file(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, Path):
+        return str(value)
+    return str(value).strip()
+
+
+def _coerce_datetime(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    if value is None:
+        return utc_now()
+    return datetime.fromisoformat(str(value))
 
 
 def _serialize_value(value: Any) -> Any:
@@ -60,9 +86,43 @@ class AppConfig:
     default_skip_version_probe: bool
     default_no_compile: bool
     default_emit_cpu_stats: bool
+    default_out_root: Path | None = None
+    default_mode: str = "all"
+    default_target_file: str = ""
+    default_gf_path: str = ""
+    default_status_message: str = ""
+    state_filename: str = ".gf_audit_state.json"
+
+    def __post_init__(self) -> None:
+        if self.default_out_root is not None:
+            self.default_out_root = _coerce_optional_path(self.default_out_root)
 
     def to_dict(self) -> dict[str, Any]:
         return _serialize_value(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> AppConfig:
+        return cls(
+            app_name=str(data["app_name"]),
+            app_version=str(data["app_version"]),
+            default_scan_dir=str(data["default_scan_dir"]),
+            default_scan_glob=str(data["default_scan_glob"]),
+            default_timeout_sec=int(data["default_timeout_sec"]),
+            default_max_files=int(data["default_max_files"]),
+            default_include_regex=str(data["default_include_regex"]),
+            default_exclude_regex=str(data["default_exclude_regex"]),
+            default_keep_ok_details=bool(data.get("default_keep_ok_details", False)),
+            default_diff_previous=bool(data.get("default_diff_previous", False)),
+            default_skip_version_probe=bool(data.get("default_skip_version_probe", False)),
+            default_no_compile=bool(data.get("default_no_compile", False)),
+            default_emit_cpu_stats=bool(data.get("default_emit_cpu_stats", False)),
+            default_out_root=_coerce_optional_path(data.get("default_out_root")),
+            default_mode=str(data.get("default_mode", "all")),
+            default_target_file=str(data.get("default_target_file") or ""),
+            default_gf_path=str(data.get("default_gf_path") or ""),
+            default_status_message=str(data.get("default_status_message") or ""),
+            state_filename=str(data.get("state_filename") or ".gf_audit_state.json"),
+        )
 
 
 @dataclass(slots=True)
@@ -79,25 +139,27 @@ class RunConfig:
     skip_version_probe: bool
     no_compile: bool
     emit_cpu_stats: bool
-    mode: Literal["all", "file"]
-    target_file: str
-    include_regex: str
-    exclude_regex: str
-    keep_ok_details: bool
-    diff_previous: bool
+    mode: Mode
+    target_file: str = ""
+    include_regex: str = ""
+    exclude_regex: str = ""
+    keep_ok_details: bool = False
+    diff_previous: bool = False
 
     def __post_init__(self) -> None:
         self.project_root = _coerce_path(self.project_root)
         self.rgl_root = _coerce_path(self.rgl_root)
         self.gf_exe = _coerce_path(self.gf_exe)
         self.out_root = _coerce_path(self.out_root)
-        _validate_literal("mode", self.mode, Literal["all", "file"])
+        self.target_file = _coerce_target_file(self.target_file)
+
+        _validate_literal("mode", self.mode, Mode)
 
         if self.timeout_sec <= 0:
             raise ValueError("timeout_sec must be > 0")
         if self.max_files < 0:
             raise ValueError("max_files must be >= 0")
-        if self.mode == "file" and not self.target_file.strip():
+        if self.mode == "file" and not self.target_file:
             raise ValueError("target_file is required when mode='file'")
 
     def to_dict(self) -> dict[str, Any]:
@@ -110,18 +172,18 @@ class RunConfig:
             rgl_root=_coerce_path(data["rgl_root"]),
             gf_exe=_coerce_path(data["gf_exe"]),
             out_root=_coerce_path(data["out_root"]),
-            scan_dir=data["scan_dir"],
-            scan_glob=data["scan_glob"],
-            gf_path=data.get("gf_path", ""),
+            scan_dir=str(data["scan_dir"]),
+            scan_glob=str(data["scan_glob"]),
+            gf_path=str(data.get("gf_path", "")),
             timeout_sec=int(data["timeout_sec"]),
             max_files=int(data.get("max_files", 0)),
             skip_version_probe=bool(data.get("skip_version_probe", False)),
             no_compile=bool(data.get("no_compile", False)),
             emit_cpu_stats=bool(data.get("emit_cpu_stats", False)),
-            mode=data.get("mode", "all"),
-            target_file=data.get("target_file", ""),
-            include_regex=data["include_regex"],
-            exclude_regex=data["exclude_regex"],
+            mode=str(data.get("mode", "all")),
+            target_file=_coerce_target_file(data.get("target_file")),
+            include_regex=str(data.get("include_regex", "")),
+            exclude_regex=str(data.get("exclude_regex", "")),
             keep_ok_details=bool(data.get("keep_ok_details", False)),
             diff_previous=bool(data.get("diff_previous", False)),
         )
@@ -158,7 +220,7 @@ class RunPaths:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> RunPaths:
         return cls(
-            run_id=data["run_id"],
+            run_id=str(data["run_id"]),
             run_dir=_coerce_path(data["run_dir"]),
             master_log_path=_coerce_path(data["master_log_path"]),
             all_scan_logs_path=_coerce_path(data["all_scan_logs_path"]),
@@ -225,8 +287,8 @@ class SourceFingerprint:
     def from_dict(cls, data: dict[str, Any]) -> SourceFingerprint:
         return cls(
             size_bytes=int(data.get("size_bytes", 0)),
-            sha1_short=data.get("sha1_short", ""),
-            last_modified_utc=data.get("last_modified_utc", ""),
+            sha1_short=str(data.get("sha1_short", "")),
+            last_modified_utc=str(data.get("last_modified_utc", "")),
         )
 
 
@@ -243,27 +305,23 @@ class CompileSummary:
 
     def __post_init__(self) -> None:
         _validate_literal("error_kind", self.error_kind, ErrorKind)
-        if self.stdout_path is not None:
-            self.stdout_path = _coerce_path(self.stdout_path)
-        if self.stderr_path is not None:
-            self.stderr_path = _coerce_path(self.stderr_path)
+        self.stdout_path = _coerce_optional_path(self.stdout_path)
+        self.stderr_path = _coerce_optional_path(self.stderr_path)
 
     def to_dict(self) -> dict[str, Any]:
         return _serialize_value(self)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> CompileSummary:
-        stdout_path = data.get("stdout_path")
-        stderr_path = data.get("stderr_path")
         return cls(
             exit_code=int(data.get("exit_code", 0)),
             timed_out=bool(data.get("timed_out", False)),
             duration_ms=int(data.get("duration_ms", 0)),
-            error_kind=data.get("error_kind", "OK"),
-            first_error=data.get("first_error", ""),
-            error_detail=data.get("error_detail", ""),
-            stdout_path=_coerce_path(stdout_path) if stdout_path else None,
-            stderr_path=_coerce_path(stderr_path) if stderr_path else None,
+            error_kind=str(data.get("error_kind", "OK")),
+            first_error=str(data.get("first_error", "")),
+            error_detail=str(data.get("error_detail", "")),
+            stdout_path=_coerce_optional_path(data.get("stdout_path")),
+            stderr_path=_coerce_optional_path(data.get("stderr_path")),
         )
 
 
@@ -284,8 +342,16 @@ class FileResult:
         self.file_path = _coerce_path(self.file_path)
         _validate_literal("status", self.status, Status)
         _validate_literal("diagnostic_class", self.diagnostic_class, DiagnosticClass)
-        if self.scan_log_path is not None:
-            self.scan_log_path = _coerce_path(self.scan_log_path)
+
+        if isinstance(self.scan_counts, dict):
+            self.scan_counts = ScanCounts.from_dict(self.scan_counts)
+        if isinstance(self.fingerprint, dict):
+            self.fingerprint = SourceFingerprint.from_dict(self.fingerprint)
+        if isinstance(self.compile_summary, dict):
+            self.compile_summary = CompileSummary.from_dict(self.compile_summary)
+
+        self.scan_log_path = _coerce_optional_path(self.scan_log_path)
+        self.blocked_by = [str(item).strip() for item in self.blocked_by if str(item).strip()]
 
     @property
     def has_scan_hits(self) -> bool:
@@ -304,18 +370,17 @@ class FileResult:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> FileResult:
-        scan_log_path = data.get("scan_log_path")
         return cls(
             file_path=_coerce_path(data["file_path"]),
-            module_name=data["module_name"],
-            status=data["status"],
-            diagnostic_class=data["diagnostic_class"],
+            module_name=str(data["module_name"]),
+            status=str(data["status"]),
+            diagnostic_class=str(data["diagnostic_class"]),
             is_direct=bool(data.get("is_direct", False)),
             blocked_by=list(data.get("blocked_by", [])),
             scan_counts=ScanCounts.from_dict(data.get("scan_counts", {})),
             fingerprint=SourceFingerprint.from_dict(data.get("fingerprint", {})),
             compile_summary=CompileSummary.from_dict(data.get("compile_summary", {})),
-            scan_log_path=_coerce_path(scan_log_path) if scan_log_path else None,
+            scan_log_path=_coerce_optional_path(data.get("scan_log_path")),
         )
 
 
@@ -336,11 +401,11 @@ class DiffEntry:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DiffEntry:
         return cls(
-            file_path=data["file_path"],
-            previous_status=data.get("previous_status", ""),
-            current_status=data.get("current_status", ""),
-            change_kind=data["change_kind"],
-            message=data.get("message", ""),
+            file_path=str(data["file_path"]),
+            previous_status=str(data.get("previous_status", "")),
+            current_status=str(data.get("current_status", "")),
+            change_kind=str(data["change_kind"]),
+            message=str(data.get("message", "")),
         )
 
 
@@ -363,13 +428,26 @@ class RunResult:
     excluded_noise_count: int = 0
     file_results: list[FileResult] = field(default_factory=list)
     diff_entries: list[DiffEntry] = field(default_factory=list)
-    top_errors: dict[str, int] = field(default_factory=dict)
+    top_errors: list[dict[str, Any]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
-        if isinstance(self.started_at, str):
-            self.started_at = datetime.fromisoformat(self.started_at)
-        if isinstance(self.finished_at, str):
-            self.finished_at = datetime.fromisoformat(self.finished_at)
+        if isinstance(self.run_config, dict):
+            self.run_config = RunConfig.from_dict(self.run_config)
+        if isinstance(self.run_paths, dict):
+            self.run_paths = RunPaths.from_dict(self.run_paths)
+
+        self.started_at = _coerce_datetime(self.started_at)
+        self.finished_at = _coerce_datetime(self.finished_at)
+
+        self.file_results = [
+            item if isinstance(item, FileResult) else FileResult.from_dict(item)
+            for item in self.file_results
+        ]
+        self.diff_entries = [
+            item if isinstance(item, DiffEntry) else DiffEntry.from_dict(item)
+            for item in self.diff_entries
+        ]
+        self.top_errors = _normalize_top_errors(self.top_errors)
 
     @property
     def failed_files(self) -> list[FileResult]:
@@ -388,11 +466,10 @@ class RunResult:
         return [result for result in self.file_results if result.diagnostic_class == "ambiguous"]
 
     def recompute_counts(self) -> None:
+        self.files_included = len(self.file_results)
         self.ok_count = sum(1 for item in self.file_results if item.status == "OK")
         self.fail_count = sum(1 for item in self.file_results if item.status == "FAIL")
-        self.direct_fail_count = sum(
-            1 for item in self.file_results if item.diagnostic_class == "direct"
-        )
+        self.direct_fail_count = sum(1 for item in self.file_results if item.diagnostic_class == "direct")
         self.downstream_fail_count = sum(
             1 for item in self.file_results if item.diagnostic_class == "downstream"
         )
@@ -411,7 +488,7 @@ class RunResult:
             started_at=data.get("started_at", utc_now().isoformat()),
             finished_at=data.get("finished_at", utc_now().isoformat()),
             duration_ms=int(data.get("duration_ms", 0)),
-            gf_version=data.get("gf_version", ""),
+            gf_version=str(data.get("gf_version", "")),
             files_seen=int(data.get("files_seen", 0)),
             files_included=int(data.get("files_included", 0)),
             files_excluded=int(data.get("files_excluded", 0)),
@@ -423,7 +500,52 @@ class RunResult:
             excluded_noise_count=int(data.get("excluded_noise_count", 0)),
             file_results=[FileResult.from_dict(item) for item in data.get("file_results", [])],
             diff_entries=[DiffEntry.from_dict(item) for item in data.get("diff_entries", [])],
-            top_errors={str(k): int(v) for k, v in data.get("top_errors", {}).items()},
+            top_errors=_normalize_top_errors(data.get("top_errors", [])),
         )
         return run_result
-```
+
+
+def _normalize_top_errors(value: Any) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+
+    if isinstance(value, dict):
+        normalized: list[dict[str, Any]] = []
+        for key, count in value.items():
+            normalized.append(
+                {
+                    "message": str(key),
+                    "count": int(count),
+                }
+            )
+        return normalized
+
+    if isinstance(value, list):
+        normalized_list: list[dict[str, Any]] = []
+        for item in value:
+            if isinstance(item, dict):
+                normalized_list.append({str(k): v for k, v in item.items()})
+            else:
+                normalized_list.append({"message": str(item), "count": 1})
+        return normalized_list
+
+    return [{"message": str(value), "count": 1}]
+
+
+__all__ = [
+    "AppConfig",
+    "RunConfig",
+    "RunPaths",
+    "ScanCounts",
+    "SourceFingerprint",
+    "CompileSummary",
+    "FileResult",
+    "DiffEntry",
+    "RunResult",
+    "Status",
+    "DiagnosticClass",
+    "ErrorKind",
+    "ChangeKind",
+    "Mode",
+    "utc_now",
+]

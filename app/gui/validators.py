@@ -1,4 +1,3 @@
-```python
 from __future__ import annotations
 
 import re
@@ -7,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from ..models import RunConfig
+
 
 _VALID_MODES = {"all", "file"}
 
@@ -50,12 +50,13 @@ def validate_mode(mode: str) -> str:
 
 
 def validate_regex(
-    pattern: str,
+    pattern: str | None,
     *,
     field_name: str = "regex",
     allow_empty: bool = True,
 ) -> str:
     normalized_pattern = "" if pattern is None else str(pattern).strip()
+
     if not normalized_pattern:
         if allow_empty:
             return ""
@@ -104,19 +105,26 @@ def validate_run_config(run_config: RunConfig) -> list[str]:
         project_root = None
 
     try:
-        validate_existing_directory(run_config.rgl_root, field_name="rgl_root")
+        validate_existing_directory(
+            run_config.rgl_root,
+            field_name="rgl_root",
+        )
     except ValidationError as exc:
         errors.append(str(exc))
 
     try:
-        _validate_executable(run_config.gf_exe, field_name="gf_exe")
+        _validate_executable(
+            run_config.gf_exe,
+            field_name="gf_exe",
+        )
     except ValidationError as exc:
         errors.append(str(exc))
 
     try:
-        validate_mode(run_config.mode)
+        normalized_mode = validate_mode(run_config.mode)
     except ValidationError as exc:
         errors.append(str(exc))
+        normalized_mode = ""
 
     try:
         validate_timeout_sec(run_config.timeout_sec)
@@ -149,7 +157,10 @@ def validate_run_config(run_config: RunConfig) -> list[str]:
             errors.append(str(exc))
 
     try:
-        _validate_out_root(run_config.out_root, field_name="out_root")
+        _validate_out_root(
+            run_config.out_root,
+            field_name="out_root",
+        )
     except ValidationError as exc:
         errors.append(str(exc))
 
@@ -161,8 +172,7 @@ def validate_run_config(run_config: RunConfig) -> list[str]:
     if max_files < 0:
         errors.append("max_files must be >= 0")
 
-    mode = (getattr(run_config, "mode", "") or "").strip().lower()
-    if mode == "file":
+    if normalized_mode == "file":
         try:
             _resolve_target_file(
                 target_file=getattr(run_config, "target_file", ""),
@@ -186,13 +196,21 @@ def _normalize_path(path_value: str | Path, *, field_name: str) -> Path:
     return Path(text).expanduser()
 
 
-def _validate_executable(executable_value: str | Path, *, field_name: str) -> Path | str:
+def _validate_executable(
+    executable_value: str | Path,
+    *,
+    field_name: str,
+) -> Path | str:
     if executable_value is None or str(executable_value).strip() == "":
         raise ValidationError(f"{field_name} cannot be empty")
 
     raw_value = str(executable_value).strip()
 
-    looks_like_path = any(sep in raw_value for sep in ("/", "\\")) or Path(raw_value).suffix != ""
+    looks_like_path = (
+        any(sep in raw_value for sep in ("/", "\\"))
+        or Path(raw_value).suffix != ""
+    )
+
     if looks_like_path:
         return validate_existing_file(raw_value, field_name=field_name)
 
@@ -207,10 +225,14 @@ def _validate_executable(executable_value: str | Path, *, field_name: str) -> Pa
 
 def _resolve_scan_root(project_root: Path, scan_dir: str | Path) -> Path:
     if scan_dir is None or str(scan_dir).strip() == "":
-        return project_root
+        return project_root.resolve()
 
     scan_dir_path = Path(str(scan_dir).strip())
-    candidate = scan_dir_path if scan_dir_path.is_absolute() else project_root / scan_dir_path
+    candidate = (
+        scan_dir_path
+        if scan_dir_path.is_absolute()
+        else project_root / scan_dir_path
+    )
 
     if not candidate.exists():
         raise ValidationError(f"scan_dir does not exist: {candidate}")
@@ -228,13 +250,9 @@ def _validate_out_root(out_root: str | Path, *, field_name: str) -> Path:
 
     parent = path.parent
     if not parent.exists():
-        raise ValidationError(
-            f"{field_name} parent directory does not exist: {parent}"
-        )
+        raise ValidationError(f"{field_name} parent directory does not exist: {parent}")
     if not parent.is_dir():
-        raise ValidationError(
-            f"{field_name} parent is not a directory: {parent}"
-        )
+        raise ValidationError(f"{field_name} parent is not a directory: {parent}")
 
     return path.resolve(strict=False)
 
@@ -249,7 +267,6 @@ def _resolve_target_file(
         raise ValidationError("target_file is required when mode='file'")
 
     raw_target = Path(str(target_file).strip()).expanduser()
-
     candidates: list[Path] = []
 
     if raw_target.is_absolute():
@@ -274,6 +291,7 @@ def _resolve_target_file(
 def _coerce_int(value: Any, *, default: int) -> int:
     if value is None or str(value).strip() == "":
         return default
+
     try:
         return int(value)
     except (TypeError, ValueError):
@@ -289,4 +307,3 @@ __all__ = [
     "validate_run_config",
     "validate_timeout_sec",
 ]
-```

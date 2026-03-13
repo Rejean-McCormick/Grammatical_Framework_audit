@@ -4,7 +4,7 @@ from collections import Counter
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Iterable, Mapping, Sequence
 
 from app.models import (
     CompileSummary,
@@ -30,40 +30,27 @@ def build_file_result(
     is_direct: bool = False,
     blocked_by: Sequence[str] | None = None,
 ) -> FileResult:
-    """
-    Build a canonical FileResult.
-
-    Default behavior:
-        - if compile_summary is None -> status = SKIPPED
-        - if compile_summary.exit_code == 0 and not timed_out -> status = OK
-        - otherwise -> status = FAIL
-
-    diagnostic_class defaults:
-        - OK      -> ok
-        - SKIPPED -> skipped
-        - FAIL    -> ambiguous
-    """
-    resolved_file_path = Path(file_path).resolve()
-    resolved_scan_log_path = Path(scan_log_path).resolve() if scan_log_path else None
+    normalized_file_path = _normalize_file_path(file_path)
+    normalized_scan_log_path = _normalize_optional_path(scan_log_path)
 
     effective_scan_counts = scan_counts or _default_scan_counts()
     effective_fingerprint = fingerprint or _default_source_fingerprint()
+
+    effective_status = status or _derive_status(compile_summary)
+    effective_diagnostic_class = diagnostic_class or _derive_diagnostic_class(effective_status)
     effective_compile_summary = compile_summary or _default_compile_summary()
 
-    effective_status = status or _derive_status(effective_compile_summary)
-    effective_diagnostic_class = diagnostic_class or _derive_diagnostic_class(effective_status)
-
     return FileResult(
-        file_path=resolved_file_path,
-        module_name=resolved_file_path.stem,
+        file_path=normalized_file_path,
+        module_name=Path(normalized_file_path).stem,
         status=effective_status,
         diagnostic_class=effective_diagnostic_class,
         is_direct=bool(is_direct),
-        blocked_by=list(blocked_by or []),
+        blocked_by=[_normalize_file_path(item) for item in (blocked_by or [])],
         scan_counts=effective_scan_counts,
         fingerprint=effective_fingerprint,
         compile_summary=effective_compile_summary,
-        scan_log_path=resolved_scan_log_path,
+        scan_log_path=normalized_scan_log_path,
     )
 
 
@@ -80,11 +67,8 @@ def build_run_result(
     files_excluded: int | None = None,
     excluded_noise_count: int | None = None,
     diff_entries: Sequence[DiffEntry] | None = None,
-    top_errors: Sequence[dict[str, object]] | None = None,
+    top_errors: Mapping[str, int] | Sequence[tuple[str, int]] | None = None,
 ) -> RunResult:
-    """
-    Build a canonical RunResult and populate all derived counters.
-    """
     normalized_started_at = _normalize_timestamp(started_at)
     normalized_finished_at = _normalize_timestamp(finished_at)
 
@@ -98,13 +82,21 @@ def build_run_result(
             normalized_finished_at,
         )
 
-    effective_files_seen = int(files_seen) if files_seen is not None else len(effective_file_results)
     effective_files_excluded = int(files_excluded) if files_excluded is not None else 0
+    effective_files_seen = (
+        int(files_seen)
+        if files_seen is not None
+        else len(effective_file_results) + effective_files_excluded
+    )
     effective_excluded_noise_count = (
-        int(excluded_noise_count) if excluded_noise_count is not None else effective_files_excluded
+        int(excluded_noise_count)
+        if excluded_noise_count is not None
+        else effective_files_excluded
     )
 
-    effective_top_errors = list(top_errors) if top_errors is not None else bucket_top_errors(effective_file_results)
+    effective_top_errors = _normalize_top_errors(top_errors)
+    if not effective_top_errors:
+        effective_top_errors = bucket_top_errors(effective_file_results)
 
     run_result = RunResult(
         run_config=run_config,
@@ -131,11 +123,6 @@ def build_run_result(
 
 
 def update_run_counts(run_result: RunResult) -> RunResult:
-    """
-    Recompute all derived counters from file_results.
-
-    This function returns a new RunResult using dataclasses.replace().
-    """
     counts = _compute_counts(run_result.file_results)
 
     return replace(
@@ -153,19 +140,7 @@ def bucket_top_errors(
     file_results: Iterable[FileResult],
     *,
     limit: int = 120,
-) -> list[dict[str, object]]:
-    """
-    Group failing file results by canonical error bucket.
-
-    Bucket format:
-        [ERROR_KIND] First error text
-
-    Returns:
-        [
-            {"count": 3, "bucket": "[OTHER] lib/src/albanian/GrammarSqi.gf:"},
-            ...
-        ]
-    """
+) -> dict[str, int]:
     counter: Counter[str] = Counter()
 
     for file_result in file_results:
@@ -192,7 +167,7 @@ def bucket_top_errors(
     if limit > 0:
         ranked = ranked[:limit]
 
-    return [{"count": count, "bucket": bucket} for bucket, count in ranked]
+    return {bucket: count for bucket, count in ranked}
 
 
 def _compute_counts(file_results: Sequence[FileResult]) -> dict[str, int]:
@@ -203,8 +178,8 @@ def _compute_counts(file_results: Sequence[FileResult]) -> dict[str, int]:
     ambiguous_fail_count = 0
 
     for file_result in file_results:
-        status = _safe_strip(file_result.status)
-        diagnostic_class = _safe_strip(file_result.diagnostic_class)
+        status = _safe_strip(file_result.status).upper()
+        diagnostic_class = _safe_strip(file_result.diagnostic_class).lower()
 
         if status == "OK":
             ok_count += 1
@@ -229,7 +204,7 @@ def _compute_counts(file_results: Sequence[FileResult]) -> dict[str, int]:
     }
 
 
-def _derive_status(compile_summary: CompileSummary) -> str:
+def _derive_status(compile_summary: CompileSummary | None) -> str:
     if compile_summary is None:
         return "SKIPPED"
 
@@ -244,9 +219,11 @@ def _derive_status(compile_summary: CompileSummary) -> str:
 
 
 def _derive_diagnostic_class(status: str) -> str:
-    if status == "OK":
+    normalized_status = _safe_strip(status).upper()
+
+    if normalized_status == "OK":
         return "ok"
-    if status == "SKIPPED":
+    if normalized_status == "SKIPPED":
         return "skipped"
     return "ambiguous"
 
@@ -315,6 +292,39 @@ def _duration_ms_from_timestamps(started_at: str, finished_at: str) -> int:
         return max(0, int(delta.total_seconds() * 1000))
     except Exception:
         return 0
+
+
+def _normalize_file_path(value: str | Path) -> str:
+    return Path(str(value)).as_posix()
+
+
+def _normalize_optional_path(value: str | Path | None) -> Path | None:
+    if value is None:
+        return None
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    return Path(text)
+
+
+def _normalize_top_errors(
+    value: Mapping[str, int] | Sequence[tuple[str, int]] | None,
+) -> dict[str, int]:
+    if value is None:
+        return {}
+
+    if isinstance(value, Mapping):
+        return {str(bucket): int(count) for bucket, count in value.items()}
+
+    normalized: dict[str, int] = {}
+    for item in value:
+        if not isinstance(item, tuple) or len(item) != 2:
+            continue
+        bucket, count = item
+        normalized[str(bucket)] = int(count)
+    return normalized
 
 
 def _safe_strip(value: object) -> str:

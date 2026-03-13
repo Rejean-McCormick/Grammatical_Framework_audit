@@ -20,13 +20,14 @@ PACKAGE_DIR: Final[Path] = Path(__file__).resolve().parent
 APP_DIR: Final[Path] = PACKAGE_DIR
 REPO_ROOT: Final[Path] = APP_DIR.parent
 DEFAULT_OUT_ROOT: Final[Path] = REPO_ROOT / "_gf_audit"
+DEFAULT_STATE_FILENAME: Final[str] = ".gf_audit_state.json"
 
 
 # ---------------------------------------------------------------------------
 # Scan defaults
 # ---------------------------------------------------------------------------
 
-DEFAULT_SCAN_DIR: Final[str] = r"lib\src\albanian"
+DEFAULT_SCAN_DIR: Final[str] = "lib/src/albanian"
 DEFAULT_SCAN_GLOB: Final[str] = "*.gf"
 DEFAULT_TIMEOUT_SEC: Final[int] = 60
 DEFAULT_MAX_FILES: Final[int] = 0
@@ -144,10 +145,10 @@ GF_PATH_AUTO_PARTS: Final[tuple[str, ...]] = (
 )
 
 CAT_MODULE_CANDIDATES: Final[tuple[str, ...]] = (
-    r"abstract\Cat.gf",
-    r"abstract\Cat.gfo",
-    r"present\Cat.gfo",
-    r"alltenses\Cat.gfo",
+    "abstract/Cat.gf",
+    "abstract/Cat.gfo",
+    "present/Cat.gfo",
+    "alltenses/Cat.gfo",
 )
 
 
@@ -165,6 +166,7 @@ __all__ = [
     "APP_DIR",
     "REPO_ROOT",
     "DEFAULT_OUT_ROOT",
+    "DEFAULT_STATE_FILENAME",
     "DEFAULT_SCAN_DIR",
     "DEFAULT_SCAN_GLOB",
     "DEFAULT_TIMEOUT_SEC",

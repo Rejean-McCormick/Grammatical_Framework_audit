@@ -3,10 +3,21 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from app.audit.diff import build_diff_entries, find_previous_run_dir, load_previous_summary
-from app.models import CompileSummary, DiffEntry, FileResult, RunConfig, RunPaths, RunResult, ScanCounts, SourceFingerprint
+from app.models import (
+    CompileSummary,
+    DiffEntry,
+    FileResult,
+    RunConfig,
+    RunPaths,
+    RunResult,
+    ScanCounts,
+    SourceFingerprint,
+)
+
+
+def _path_text(value: object) -> str:
+    return Path(str(value)).as_posix()
 
 
 def _make_run_config(out_root: Path) -> RunConfig:
@@ -101,9 +112,11 @@ def _make_file_result(
     first_error: str = "",
     blocked_by: list[str] | None = None,
 ) -> FileResult:
+    normalized_path = Path(file_path)
+
     return FileResult(
-        file_path=file_path,
-        module_name=Path(file_path).stem,
+        file_path=normalized_path,
+        module_name=normalized_path.stem,
         status=status,
         diagnostic_class=diagnostic_class,
         is_direct=(diagnostic_class == "direct"),
@@ -115,7 +128,7 @@ def _make_file_result(
             error_kind=error_kind,
             first_error=first_error,
         ),
-        scan_log_path=Path(f"{Path(file_path).stem}.scan.txt"),
+        scan_log_path=Path(f"{normalized_path.stem}.scan.txt"),
     )
 
 
@@ -242,7 +255,7 @@ def test_build_diff_entries_marks_improved_regressed_new_and_removed(tmp_path: P
         current_run_result=current_run_result,
     )
 
-    entries_by_file = {entry.file_path: entry for entry in diff_entries}
+    entries_by_file = {_path_text(entry.file_path): entry for entry in diff_entries}
 
     assert entries_by_file["lib/src/albanian/GrammarSqi.gf"].change_kind == "unchanged"
     assert entries_by_file["lib/src/albanian/GrammarSqi.gf"].previous_status == "FAIL"
@@ -298,23 +311,72 @@ def test_build_diff_entries_marks_regression_when_ok_becomes_fail(tmp_path: Path
     )
 
     assert len(diff_entries) == 1
-    assert diff_entries[0].file_path == "lib/src/albanian/LangSqi.gf"
+    assert _path_text(diff_entries[0].file_path) == "lib/src/albanian/LangSqi.gf"
     assert diff_entries[0].change_kind == "regressed"
     assert diff_entries[0].previous_status == "OK"
     assert diff_entries[0].current_status == "FAIL"
 
 
 def test_load_previous_summary_reads_summary_json(tmp_path: Path) -> None:
-    run_dir = tmp_path / "run_20260311_110000"
+    out_root = tmp_path / "_gf_audit"
+    run_dir = out_root / "run_20260311_110000"
     run_dir.mkdir(parents=True)
 
     summary_path = run_dir / "summary.json"
     payload = {
+        "run_config": {
+            "project_root": "C:/work/project",
+            "rgl_root": "C:/work/gf-rgl/src",
+            "gf_exe": "C:/work/gf.exe",
+            "out_root": str(out_root),
+            "scan_dir": "lib/src/albanian",
+            "scan_glob": "*.gf",
+            "gf_path": "lib/src:lib/src/albanian:abstract:common:prelude",
+            "timeout_sec": 60,
+            "max_files": 0,
+            "skip_version_probe": False,
+            "no_compile": False,
+            "emit_cpu_stats": False,
+            "mode": "all",
+            "target_file": "",
+            "include_regex": r"^[A-Z][A-Za-z0-9_]*\.gf$",
+            "exclude_regex": r"( - Copie\.gf$|\.bak\.gf$|\.tmp\.gf$|\.disabled\.gf$|\s)",
+            "keep_ok_details": False,
+            "diff_previous": True,
+        },
         "run_paths": {
             "run_id": "20260311_110000",
             "run_dir": str(run_dir),
+            "master_log_path": str(run_dir / "raw" / "master.log"),
+            "all_scan_logs_path": str(run_dir / "raw" / "ALL_SCAN_LOGS.TXT"),
+            "all_logs_path": str(run_dir / "raw" / "ALL_LOGS.TXT"),
             "summary_json_path": str(summary_path),
+            "summary_md_path": str(run_dir / "summary.md"),
+            "ai_brief_path": str(run_dir / "ai_brief.txt"),
+            "top_errors_path": str(run_dir / "top_errors.txt"),
+            "details_dir": str(run_dir / "details"),
+            "raw_dir": str(run_dir / "raw"),
+            "compile_logs_dir": str(run_dir / "raw" / "compile"),
+            "scan_logs_dir": str(run_dir / "raw" / "scan"),
+            "artifacts_dir": str(run_dir / "artifacts"),
+            "gfo_dir": str(run_dir / "artifacts" / "gfo"),
+            "out_dir": str(run_dir / "artifacts" / "out"),
         },
+        "started_at": "2026-03-11T12:00:00Z",
+        "finished_at": "2026-03-11T12:00:02Z",
+        "duration_ms": 2000,
+        "gf_version": "3.12",
+        "files_seen": 1,
+        "files_included": 1,
+        "files_excluded": 0,
+        "ok_count": 0,
+        "fail_count": 1,
+        "direct_fail_count": 1,
+        "downstream_fail_count": 0,
+        "ambiguous_fail_count": 0,
+        "excluded_noise_count": 0,
+        "diff_entries": [],
+        "top_errors": [],
         "file_results": [
             {
                 "file_path": "lib/src/albanian/GrammarSqi.gf",
@@ -357,7 +419,7 @@ def test_load_previous_summary_reads_summary_json(tmp_path: Path) -> None:
     assert loaded is not None
     assert loaded.run_paths.run_id == "20260311_110000"
     assert len(loaded.file_results) == 1
-    assert loaded.file_results[0].file_path == "lib/src/albanian/GrammarSqi.gf"
+    assert _path_text(loaded.file_results[0].file_path) == "lib/src/albanian/GrammarSqi.gf"
     assert loaded.file_results[0].status == "FAIL"
 
 

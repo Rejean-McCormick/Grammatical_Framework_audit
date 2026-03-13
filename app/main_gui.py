@@ -62,9 +62,16 @@ def _show_fatal_error(title: str, message: str, details: str = "") -> None:
 
 
 def _install_excepthook() -> None:
-    def _handle_exception(exc_type: type[BaseException], exc_value: BaseException, exc_tb: Any) -> None:
+    def _handle_exception(
+        exc_type: type[BaseException],
+        exc_value: BaseException,
+        exc_tb: Any,
+    ) -> None:
         details = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
-        logger.exception("Unhandled exception in GUI", exc_info=(exc_type, exc_value, exc_tb))
+        logger.exception(
+            "Unhandled exception in GUI",
+            exc_info=(exc_type, exc_value, exc_tb),
+        )
         _show_fatal_error(
             title="GF Audit - Fatal Error",
             message=str(exc_value) or exc_type.__name__,
@@ -82,6 +89,15 @@ def _load_initial_state() -> Any:
         return merged_state
 
     return app_state
+
+
+def _sync_window_state(main_window: Any) -> None:
+    try:
+        sync_method = getattr(main_window, "_sync_state_from_widgets", None)
+        if callable(sync_method):
+            sync_method()
+    except Exception:
+        logger.exception("Failed to sync GUI widget state before save")
 
 
 def _save_current_state(current_app_state: Any) -> None:
@@ -109,7 +125,11 @@ def main() -> int:
         app_state=current_app_state,
     )
 
-    qt_app.aboutToQuit.connect(lambda: _save_current_state(current_app_state))
+    def _persist_before_quit() -> None:
+        _sync_window_state(main_window)
+        _save_current_state(current_app_state)
+
+    qt_app.aboutToQuit.connect(_persist_before_quit)
 
     if hasattr(main_window, "show"):
         main_window.show()

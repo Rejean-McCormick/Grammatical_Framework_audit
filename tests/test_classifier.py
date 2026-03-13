@@ -9,6 +9,7 @@ from app.audit.classifier import (
     classify_single_result,
     resolve_blocked_by,
 )
+from app.audit.result_model import build_file_result
 from app.models import CompileSummary, FileResult, ScanCounts, SourceFingerprint
 
 
@@ -57,7 +58,6 @@ def _make_compile_summary(
 def _make_file_result(
     *,
     file_path: str,
-    module_name: str | None = None,
     status: str = "SKIPPED",
     diagnostic_class: str = "skipped",
     is_direct: bool = False,
@@ -67,16 +67,14 @@ def _make_file_result(
     exit_code: int = 0,
     timed_out: bool = False,
 ) -> FileResult:
-    module_name = module_name or Path(file_path).stem
-    blocked_by = blocked_by or []
+    path_obj = Path(file_path)
 
-    return FileResult(
-        file_path=file_path,
-        module_name=module_name,
+    return build_file_result(
+        file_path=path_obj,
         status=status,
         diagnostic_class=diagnostic_class,
         is_direct=is_direct,
-        blocked_by=blocked_by,
+        blocked_by=blocked_by or [],
         scan_counts=_make_scan_counts(),
         fingerprint=_make_fingerprint(),
         compile_summary=_make_compile_summary(
@@ -84,10 +82,10 @@ def _make_file_result(
             timed_out=timed_out,
             error_kind=error_kind,
             first_error=first_error,
-            stdout_name=f"{module_name}.out.txt",
-            stderr_name=f"{module_name}.err.txt",
+            stdout_name=f"{path_obj.stem}.out.txt",
+            stderr_name=f"{path_obj.stem}.err.txt",
         ),
-        scan_log_path=Path(f"{module_name}.scan.txt"),
+        scan_log_path=Path(f"{path_obj.stem}.scan.txt"),
     )
 
 
@@ -299,4 +297,3 @@ def test_downstream_classification_prefers_failed_dependency_over_module_name_no
     assert lang.diagnostic_class == "downstream"
     assert lang.is_direct is False
     assert lang.blocked_by == ["lib/src/albanian/GrammarSqi.gf"]
-
