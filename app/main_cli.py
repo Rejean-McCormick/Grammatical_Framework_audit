@@ -8,19 +8,9 @@ from typing import Sequence
 try:
     from .bootstrap import build_app_config, build_run_config
     from .audit.audit_core import run_audit
-    from .reports.report_ai_brief import write_ai_brief
-    from .reports.report_details import write_file_detail_logs
-    from .reports.report_json import write_summary_json
-    from .reports.report_logs import write_all_logs, write_all_scan_logs, write_top_errors
-    from .reports.report_md import write_summary_md
 except ImportError:  # pragma: no cover
     from bootstrap import build_app_config, build_run_config
     from audit.audit_core import run_audit
-    from reports.report_ai_brief import write_ai_brief
-    from reports.report_details import write_file_detail_logs
-    from reports.report_json import write_summary_json
-    from reports.report_logs import write_all_logs, write_all_scan_logs, write_top_errors
-    from reports.report_md import write_summary_md
 
 
 EXIT_OK = 0
@@ -204,16 +194,6 @@ def build_cli_run_config(args: argparse.Namespace):
     )
 
 
-def write_reports(run_result) -> None:
-    write_summary_json(run_result)
-    write_summary_md(run_result)
-    write_ai_brief(run_result)
-    write_file_detail_logs(run_result)
-    write_top_errors(run_result)
-    write_all_scan_logs(run_result)
-    write_all_logs(run_result)
-
-
 def print_run_summary(run_result) -> None:
     run_paths = run_result.run_paths
 
@@ -231,7 +211,7 @@ def print_run_summary(run_result) -> None:
     print()
     print(f"summary_json: {run_paths.summary_json_path}")
     print(f"summary_md: {run_paths.summary_md_path}")
-    print(f"ai_brief: {run_paths.ai_brief_path}")
+    print(f"ai_ready: {run_paths.ai_ready_path}")
     print(f"all_scan_logs: {run_paths.all_scan_logs_path}")
     print(f"all_logs: {run_paths.all_logs_path}")
     print()
@@ -246,7 +226,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         args = parse_args(argv)
         run_config = build_cli_run_config(args)
         run_result = run_audit(run_config)
-        write_reports(run_result)
         print_run_summary(run_result)
         return determine_exit_code(run_result)
     except SystemExit as exc:

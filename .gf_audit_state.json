@@ -13,10 +13,10 @@
   "selected_keep_ok_details": true,
   "selected_diff_previous": false,
   "selected_skip_version_probe": false,
-  "selected_no_compile": true,
+  "selected_no_compile": false,
   "selected_emit_cpu_stats": false,
   "is_running": false,
-  "last_run_dir": null,
-  "last_summary_path": null,
-  "status_message": "Audit failed."
+  "last_run_dir": "C:\\mycode\\Grammatical_Framework\\gf-audit\\run_20260313_114916",
+  "last_summary_path": "C:\\mycode\\Grammatical_Framework\\gf-audit\\run_20260313_114916\\summary.json",
+  "status_message": "Audit completed."
 }

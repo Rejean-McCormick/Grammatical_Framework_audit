@@ -53,7 +53,7 @@ def _make_run_paths(out_root: Path, run_id: str) -> RunPaths:
         all_logs_path=run_dir / "raw" / "ALL_LOGS.TXT",
         summary_json_path=run_dir / "summary.json",
         summary_md_path=run_dir / "summary.md",
-        ai_brief_path=run_dir / "ai_brief.txt",
+        ai_ready_path=run_dir / "AI_READY.md",
         top_errors_path=run_dir / "top_errors.txt",
         details_dir=run_dir / "details",
         raw_dir=run_dir / "raw",
@@ -352,7 +352,7 @@ def test_load_previous_summary_reads_summary_json(tmp_path: Path) -> None:
             "all_logs_path": str(run_dir / "raw" / "ALL_LOGS.TXT"),
             "summary_json_path": str(summary_path),
             "summary_md_path": str(run_dir / "summary.md"),
-            "ai_brief_path": str(run_dir / "ai_brief.txt"),
+            "ai_ready_path": str(run_dir / "AI_READY.md"),
             "top_errors_path": str(run_dir / "top_errors.txt"),
             "details_dir": str(run_dir / "details"),
             "raw_dir": str(run_dir / "raw"),
@@ -418,9 +418,80 @@ def test_load_previous_summary_reads_summary_json(tmp_path: Path) -> None:
 
     assert loaded is not None
     assert loaded.run_paths.run_id == "20260311_110000"
+    assert _path_text(loaded.run_paths.ai_ready_path) == _path_text(run_dir / "AI_READY.md")
     assert len(loaded.file_results) == 1
     assert _path_text(loaded.file_results[0].file_path) == "lib/src/albanian/GrammarSqi.gf"
     assert loaded.file_results[0].status == "FAIL"
+
+
+def test_load_previous_summary_reads_legacy_ai_brief_path(tmp_path: Path) -> None:
+    out_root = tmp_path / "_gf_audit"
+    run_dir = out_root / "run_20260311_110000"
+    run_dir.mkdir(parents=True)
+
+    summary_path = run_dir / "summary.json"
+    payload = {
+        "run_config": {
+            "project_root": "C:/work/project",
+            "rgl_root": "C:/work/gf-rgl/src",
+            "gf_exe": "C:/work/gf.exe",
+            "out_root": str(out_root),
+            "scan_dir": "lib/src/albanian",
+            "scan_glob": "*.gf",
+            "gf_path": "lib/src:lib/src/albanian:abstract:common:prelude",
+            "timeout_sec": 60,
+            "max_files": 0,
+            "skip_version_probe": False,
+            "no_compile": False,
+            "emit_cpu_stats": False,
+            "mode": "all",
+            "target_file": "",
+            "include_regex": r"^[A-Z][A-Za-z0-9_]*\.gf$",
+            "exclude_regex": r"( - Copie\.gf$|\.bak\.gf$|\.tmp\.gf$|\.disabled\.gf$|\s)",
+            "keep_ok_details": False,
+            "diff_previous": True,
+        },
+        "run_paths": {
+            "run_id": "20260311_110000",
+            "run_dir": str(run_dir),
+            "master_log_path": str(run_dir / "raw" / "master.log"),
+            "all_scan_logs_path": str(run_dir / "raw" / "ALL_SCAN_LOGS.TXT"),
+            "all_logs_path": str(run_dir / "raw" / "ALL_LOGS.TXT"),
+            "summary_json_path": str(summary_path),
+            "summary_md_path": str(run_dir / "summary.md"),
+            "ai_brief_path": str(run_dir / "ai_brief.txt"),
+            "top_errors_path": str(run_dir / "top_errors.txt"),
+            "details_dir": str(run_dir / "details"),
+            "raw_dir": str(run_dir / "raw"),
+            "compile_logs_dir": str(run_dir / "raw" / "compile"),
+            "scan_logs_dir": str(run_dir / "raw" / "scan"),
+            "artifacts_dir": str(run_dir / "artifacts"),
+            "gfo_dir": str(run_dir / "artifacts" / "gfo"),
+            "out_dir": str(run_dir / "artifacts" / "out"),
+        },
+        "started_at": "2026-03-11T12:00:00Z",
+        "finished_at": "2026-03-11T12:00:02Z",
+        "duration_ms": 2000,
+        "gf_version": "3.12",
+        "files_seen": 0,
+        "files_included": 0,
+        "files_excluded": 0,
+        "ok_count": 0,
+        "fail_count": 0,
+        "direct_fail_count": 0,
+        "downstream_fail_count": 0,
+        "ambiguous_fail_count": 0,
+        "excluded_noise_count": 0,
+        "diff_entries": [],
+        "top_errors": [],
+        "file_results": [],
+    }
+    summary_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    loaded = load_previous_summary(summary_path)
+
+    assert loaded is not None
+    assert _path_text(loaded.run_paths.ai_ready_path) == _path_text(run_dir / "ai_brief.txt")
 
 
 def test_load_previous_summary_returns_none_when_file_is_missing(tmp_path: Path) -> None:
@@ -460,3 +531,4 @@ def test_build_diff_entries_returns_diff_entry_objects(tmp_path: Path) -> None:
     assert len(diff_entries) == 1
     assert isinstance(diff_entries[0], DiffEntry)
     assert diff_entries[0].change_kind == "new"
+

@@ -47,7 +47,6 @@ temp/
 _gf_audit/
 logs/
 artifacts/
-reports/
 
 # Generated logs / transcripts
 *.log

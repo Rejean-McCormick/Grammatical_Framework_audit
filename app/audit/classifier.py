@@ -201,8 +201,23 @@ def _initialize_status(file_result: FileResult) -> None:
         file_result.blocked_by = []
         return
 
+    if _is_compile_skipped(file_result):
+        file_result.status = STATUS_SKIPPED
+        file_result.diagnostic_class = DIAG_SKIPPED
+        file_result.is_direct = False
+        file_result.blocked_by = []
+        return
+
     error_kind = _get_error_kind(file_result)
     exit_code = int(getattr(compile_summary, "exit_code", 0) or 0)
+    timed_out = bool(getattr(compile_summary, "timed_out", False))
+
+    if timed_out:
+        file_result.status = STATUS_FAIL
+        file_result.diagnostic_class = ""
+        file_result.is_direct = False
+        file_result.blocked_by = []
+        return
 
     if error_kind == ERROR_KIND_OK and exit_code == 0:
         file_result.status = STATUS_OK
@@ -215,6 +230,18 @@ def _initialize_status(file_result: FileResult) -> None:
     file_result.diagnostic_class = ""
     file_result.is_direct = False
     file_result.blocked_by = []
+
+
+def _is_compile_skipped(file_result: FileResult) -> bool:
+    compile_summary = getattr(file_result, "compile_summary", None)
+    if compile_summary is None:
+        return True
+
+    error_detail = str(getattr(compile_summary, "error_detail", "") or "").strip().lower()
+    if "compile skipped" in error_detail:
+        return True
+
+    return False
 
 
 def _resolve_referenced_results(
@@ -359,4 +386,3 @@ def _module_key(value: object) -> str:
 
 def _module_name_from_path(file_path: object) -> str:
     return Path(str(file_path)).stem if file_path is not None else ""
-

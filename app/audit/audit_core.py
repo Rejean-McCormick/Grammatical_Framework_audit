@@ -15,7 +15,7 @@ from ..models import (
     ScanCounts,
     SourceFingerprint,
 )
-from ..reports.report_ai_brief import write_ai_brief
+from ..reports.report_ai_ready import write_ai_ready
 from ..reports.report_details import write_file_detail_logs
 from ..reports.report_json import write_summary_json
 from ..reports.report_logs import (
@@ -116,14 +116,11 @@ def _run_audit_impl(run_config: RunConfig, run_paths: RunPaths | None = None) ->
 
                 fingerprint = build_source_fingerprint(file_path)
 
-                if run_config.no_compile:
-                    compile_summary = _build_skipped_compile_summary()
-                else:
-                    compile_summary = compile_file(
-                        file_path=file_path,
-                        run_config=run_config,
-                        run_paths=run_paths,
-                    )
+                compile_summary = compile_file(
+                    file_path=file_path,
+                    run_config=run_config,
+                    run_paths=run_paths,
+                )
 
                 file_result = build_file_result(
                     file_path=file_path,
@@ -230,7 +227,7 @@ def _run_audit_impl(run_config: RunConfig, run_paths: RunPaths | None = None) ->
         run_result = update_run_counts(run_result)
         run_result.top_errors = bucket_top_errors(run_result.file_results)
 
-        _write_reports(
+        _write_reports_best_effort(
             run_result=run_result,
             master_log_lines=master_log_lines,
         )
@@ -242,11 +239,22 @@ def _write_reports(run_result: RunResult, master_log_lines: list[str]) -> None:
     write_master_log(run_result.run_paths.master_log_path, master_log_lines)
     write_summary_json(run_result)
     write_summary_md(run_result)
-    write_ai_brief(run_result)
-    write_top_errors(run_result.run_paths.top_errors_path, run_result.top_errors)
+    write_ai_ready(run_result)
+    write_top_errors(run_result)
     write_file_detail_logs(run_result)
     write_all_scan_logs(run_result)
     write_all_logs(run_result)
+
+
+def _write_reports_best_effort(run_result: RunResult, master_log_lines: list[str]) -> None:
+    try:
+        _write_reports(run_result=run_result, master_log_lines=master_log_lines)
+    except Exception as report_exc:
+        _log_master(master_log_lines, f"warning: report_write_failed={report_exc}")
+        try:
+            write_master_log(run_result.run_paths.master_log_path, master_log_lines)
+        except Exception:
+            pass
 
 
 def _build_skipped_compile_summary() -> CompileSummary:
@@ -257,8 +265,8 @@ def _build_skipped_compile_summary() -> CompileSummary:
         error_kind="OK",
         first_error="",
         error_detail="compile skipped (-no-compile)",
-        stdout_path=Path(),
-        stderr_path=Path(),
+        stdout_path=None,
+        stderr_path=None,
     )
 
 
@@ -274,8 +282,8 @@ def _build_script_error_file_result(
         error_kind="SCRIPT",
         first_error=error_message,
         error_detail="",
-        stdout_path=Path(),
-        stderr_path=Path(),
+        stdout_path=None,
+        stderr_path=None,
     )
 
     return build_file_result(
@@ -287,7 +295,7 @@ def _build_script_error_file_result(
         scan_counts=_empty_scan_counts(),
         fingerprint=fingerprint,
         compile_summary=compile_summary,
-        scan_log_path=Path(),
+        scan_log_path=None,
     )
 
 
@@ -316,4 +324,3 @@ def _safe_fingerprint(file_path: Path) -> SourceFingerprint:
 def _log_master(master_log_lines: list[str], message: str) -> None:
     timestamp = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
     master_log_lines.append(f"{timestamp}  {message}")
-

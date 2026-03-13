@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field, fields, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal, TypeVar, get_args
+from typing import Any, Literal, get_args
 
 
 Status = Literal["OK", "FAIL", "SKIPPED"]
@@ -15,9 +15,6 @@ Mode = Literal["all", "file"]
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
-
-
-T = TypeVar("T")
 
 
 def _coerce_path(value: Any) -> Path:
@@ -69,6 +66,14 @@ def _validate_literal(name: str, value: str, allowed_literal: Any) -> None:
     allowed = set(get_args(allowed_literal))
     if value not in allowed:
         raise ValueError(f"{name} must be one of {sorted(allowed)}, got {value!r}")
+
+
+def _get_ai_ready_path_value(data: dict[str, Any]) -> Any:
+    if "ai_ready_path" in data:
+        return data["ai_ready_path"]
+    if "ai_brief_path" in data:
+        return data["ai_brief_path"]
+    raise KeyError("ai_ready_path")
 
 
 @dataclass(slots=True)
@@ -198,7 +203,7 @@ class RunPaths:
     all_logs_path: Path
     summary_json_path: Path
     summary_md_path: Path
-    ai_brief_path: Path
+    ai_ready_path: Path
     top_errors_path: Path
     details_dir: Path
     raw_dir: Path
@@ -227,7 +232,7 @@ class RunPaths:
             all_logs_path=_coerce_path(data["all_logs_path"]),
             summary_json_path=_coerce_path(data["summary_json_path"]),
             summary_md_path=_coerce_path(data["summary_md_path"]),
-            ai_brief_path=_coerce_path(data["ai_brief_path"]),
+            ai_ready_path=_coerce_path(_get_ai_ready_path_value(data)),
             top_errors_path=_coerce_path(data["top_errors_path"]),
             details_dir=_coerce_path(data["details_dir"]),
             raw_dir=_coerce_path(data["raw_dir"]),
@@ -482,7 +487,7 @@ class RunResult:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> RunResult:
-        run_result = cls(
+        return cls(
             run_config=RunConfig.from_dict(data["run_config"]),
             run_paths=RunPaths.from_dict(data["run_paths"]),
             started_at=data.get("started_at", utc_now().isoformat()),
@@ -502,7 +507,6 @@ class RunResult:
             diff_entries=[DiffEntry.from_dict(item) for item in data.get("diff_entries", [])],
             top_errors=_normalize_top_errors(data.get("top_errors", [])),
         )
-        return run_result
 
 
 def _normalize_top_errors(value: Any) -> list[dict[str, Any]]:
@@ -524,9 +528,15 @@ def _normalize_top_errors(value: Any) -> list[dict[str, Any]]:
         normalized_list: list[dict[str, Any]] = []
         for item in value:
             if isinstance(item, dict):
-                normalized_list.append({str(k): v for k, v in item.items()})
-            else:
-                normalized_list.append({"message": str(item), "count": 1})
+                message = str(item.get("message", "")).strip()
+                count = int(item.get("count", 0) or 0)
+                if message:
+                    normalized_list.append({"message": message, "count": count})
+                continue
+            if isinstance(item, tuple) and len(item) == 2:
+                normalized_list.append({"message": str(item[0]), "count": int(item[1])})
+                continue
+            normalized_list.append({"message": str(item), "count": 1})
         return normalized_list
 
     return [{"message": str(value), "count": 1}]

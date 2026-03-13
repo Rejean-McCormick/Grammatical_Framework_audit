@@ -13,6 +13,7 @@ It scans GF source files, optionally compiles them with `gf.exe`, classifies fai
 - generate compact summaries first and detailed logs second
 - support iterative debugging with run-to-run diffing
 - provide both a Windows GUI and a CLI
+- produce a top-level AI handoff file without requiring a second compilation
 
 ## Core Features
 
@@ -26,7 +27,7 @@ It scans GF source files, optionally compiles them with `gf.exe`, classifies fai
   - `ambiguous`
 - source fingerprinting
 - diff against the previous run
-- structured outputs for summary, logs, and AI briefing
+- structured outputs for summary, logs, and AI-ready handoff
 
 ## Repository Layout
 
@@ -64,6 +65,14 @@ gf-audit/
       main_window.py
       validators.py
       widgets.py
+
+    reports/
+      __init__.py
+      report_ai_ready.py
+      report_details.py
+      report_json.py
+      report_logs.py
+      report_md.py
 
     utils/
       __init__.py
@@ -136,7 +145,7 @@ _gf_audit/
   run_YYYYMMDD_HHMMSS/
     summary.json
     summary.md
-    ai_brief.txt
+    AI_READY.md
     top_errors.txt
     details/
     raw/
@@ -150,9 +159,9 @@ _gf_audit/
 * `summary.md`
 
   * human-readable report
-* `ai_brief.txt`
+* `AI_READY.md`
 
-  * compact briefing for AI workflows
+  * top-level AI handoff packet with inlined diagnostic excerpts, artifact paths, and a ready-to-paste prompt
 * `top_errors.txt`
 
   * grouped first-error summary
@@ -165,6 +174,29 @@ _gf_audit/
 * per-file scan logs
 * per-file compile logs
 * per-file detail logs for failures
+
+## AI-First Workflow
+
+`gf-audit` is designed to support AI-assisted debugging without rerunning compilation.
+
+A normal workflow is:
+
+1. run `gf-audit` once
+2. inspect `summary.md` if you want a quick human summary
+3. give `AI_READY.md` to an AI system as the main handoff artifact
+4. use `ALL_LOGS.TXT` or files under `details/` only when deeper raw evidence is needed
+
+`AI_READY.md` is intended to be self-contained. It includes:
+
+* run summary
+* main failure summary
+* selected compile progression excerpt
+* selected stderr excerpt
+* fatal error block
+* artifact paths
+* a ready-made prompt for another AI
+
+This avoids forcing the AI to dig through nested folders before it can reason about the failure.
 
 ## Configuration
 
@@ -194,6 +226,13 @@ Use `launch_cli.bat` to run the command-line version.
 
 The CLI builds a run configuration, resolves run paths, runs the audit, and writes outputs.
 
+Typical top-level outputs exposed by the CLI include:
+
+* `summary.json`
+* `summary.md`
+* `AI_READY.md`
+* `top_errors.txt`
+
 ## GUI Entry Point
 
 Use `launch_gui.bat` to run the Windows GUI.
@@ -222,6 +261,16 @@ The core run contract is based on typed models such as:
 * `RunResult`
 
 These objects connect the scanner, compiler, classifier, diff engine, and output writers.
+
+Important `RunPaths` artifacts include:
+
+* `summary_json_path`
+* `summary_md_path`
+* `ai_ready_path`
+* `top_errors_path`
+* `master_log_path`
+* `all_scan_logs_path`
+* `all_logs_path`
 
 ## Execution Flow
 
@@ -256,7 +305,9 @@ Recommended focus areas:
 * robust filesystem handling
 * logs preserved even after partial failure
 * compact summaries first, raw logs second
+* AI-ready handoff at the top level
 * no hidden coupling between scan and compile phases
+* no second compilation to produce AI-facing output
 
 ## Status
 

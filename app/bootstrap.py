@@ -353,7 +353,7 @@ def build_run_paths(run_config: RunConfig) -> RunPaths:
         run_<id>/
           summary.json
           summary.md
-          ai_brief.txt
+          AI_READY.md
           top_errors.txt
           details/
           raw/
@@ -372,11 +372,12 @@ def build_run_paths(run_config: RunConfig) -> RunPaths:
     all_logs_filename = _cfg("ALL_LOGS_FILENAME", "ALL_LOGS.TXT")
     summary_json_filename = _cfg("SUMMARY_JSON_FILENAME", "summary.json")
     summary_md_filename = _cfg("SUMMARY_MD_FILENAME", "summary.md")
-    ai_brief_filename = _cfg("AI_BRIEF_FILENAME", "ai_brief.txt")
+    ai_ready_filename = _cfg("AI_READY_FILENAME", "AI_READY.md")
     top_errors_filename = _cfg("TOP_ERRORS_FILENAME", "top_errors.txt")
 
     details_dirname = _cfg("DETAILS_DIRNAME", "details")
     raw_dirname = _cfg("RAW_DIRNAME", "raw")
+    logs_dirname = _cfg("LOGS_DIRNAME", "logs")
     compile_logs_dirname = _cfg("COMPILE_LOGS_DIRNAME", "compile")
     scan_logs_dirname = _cfg("SCAN_LOGS_DIRNAME", "scan")
     artifacts_dirname = _cfg("ARTIFACTS_DIRNAME", "artifacts")
@@ -389,7 +390,7 @@ def build_run_paths(run_config: RunConfig) -> RunPaths:
     details_dir = _ensure_dir(run_dir / details_dirname)
     raw_dir = _ensure_dir(run_dir / raw_dirname)
 
-    logs_root = _ensure_dir(raw_dir / "logs")
+    logs_root = _ensure_dir(raw_dir / logs_dirname)
     compile_logs_dir = _ensure_dir(logs_root / compile_logs_dirname)
     scan_logs_dir = _ensure_dir(logs_root / scan_logs_dirname)
 
@@ -402,10 +403,9 @@ def build_run_paths(run_config: RunConfig) -> RunPaths:
     all_logs_path = raw_dir / all_logs_filename
     summary_json_path = run_dir / summary_json_filename
     summary_md_path = run_dir / summary_md_filename
-    ai_brief_path = run_dir / ai_brief_filename
+    ai_ready_path = run_dir / ai_ready_filename
     top_errors_path = run_dir / top_errors_filename
 
-    # Touch critical aggregate files early so they exist even on partial runs.
     for bootstrap_file in (master_log_path, all_scan_logs_path, all_logs_path):
         if not bootstrap_file.exists():
             bootstrap_file.write_text("", encoding="utf-8")
@@ -418,7 +418,7 @@ def build_run_paths(run_config: RunConfig) -> RunPaths:
         all_logs_path=all_logs_path,
         summary_json_path=summary_json_path,
         summary_md_path=summary_md_path,
-        ai_brief_path=ai_brief_path,
+        ai_ready_path=ai_ready_path,
         top_errors_path=top_errors_path,
         details_dir=details_dir,
         raw_dir=raw_dir,
