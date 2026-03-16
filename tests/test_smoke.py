@@ -13,7 +13,7 @@ def _make_run_result(*, fail_count: int) -> SimpleNamespace:
         run_dir=Path("out/run_20260311_120000"),
         summary_json_path=Path("out/run_20260311_120000/summary.json"),
         summary_md_path=Path("out/run_20260311_120000/summary.md"),
-        ai_brief_path=Path("out/run_20260311_120000/ai_brief.txt"),
+        ai_ready_path=Path("out/run_20260311_120000/AI_READY.md"),
         all_scan_logs_path=Path("out/run_20260311_120000/ALL_SCAN_LOGS.TXT"),
         all_logs_path=Path("out/run_20260311_120000/ALL_LOGS.TXT"),
     )
@@ -98,4 +98,3 @@ def test_determine_exit_code_matches_fail_count() -> None:
         main_cli.determine_exit_code(_make_run_result(fail_count=1))
         == main_cli.EXIT_AUDIT_FAILURES
     )
-

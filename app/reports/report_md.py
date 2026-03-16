@@ -29,9 +29,9 @@ def build_summary_md(run_result: RunResult) -> str:
 
     sections: list[str] = []
 
-    sections.append(f"# GF Audit Summary")
+    sections.append("# GF Audit Summary")
     sections.append("")
-    sections.append(f"## Run")
+    sections.append("## Run")
     sections.append("")
     sections.extend(_build_run_metadata(run_result))
     sections.append("")
@@ -101,6 +101,12 @@ def _build_run_metadata(run_result: RunResult) -> list[str]:
     run_config = run_result.run_config
     run_paths = run_result.run_paths
 
+    # Current field name is ai_ready_path.
+    # Fall back to legacy ai_brief_path for older serialized runs.
+    ai_ready_path = getattr(run_paths, "ai_ready_path", None)
+    if ai_ready_path is None:
+        ai_ready_path = getattr(run_paths, "ai_brief_path", None)
+
     lines = [
         f"- run_id: `{_safe_str(run_paths.run_id)}`",
         f"- started_at: `{_safe_str(run_result.started_at)}`",
@@ -113,7 +119,7 @@ def _build_run_metadata(run_result: RunResult) -> list[str]:
         f"- gf_exe: `{_safe_str(run_config.gf_exe)}`",
         f"- gf_version: `{_safe_str(run_result.gf_version) or 'unknown'}`",
         f"- summary_json_path: `{_safe_str(run_paths.summary_json_path)}`",
-        f"- ai_brief_path: `{_safe_str(run_paths.ai_brief_path)}`",
+        f"- ai_ready_path: `{_safe_str(ai_ready_path)}`",
     ]
     return lines
 
@@ -273,7 +279,7 @@ def _build_diff_entries(diff_entries: Iterable[DiffEntry]) -> list[str]:
         message = _safe_str(entry.message)
         lines.append(
             f"- `{entry.file_path}`: `{previous_status}` -> `{current_status}` "
-            f"({ _safe_str(entry.change_kind) })".replace("( ", "(").replace(" )", ")")
+            f"({_safe_str(entry.change_kind)})"
         )
         if message:
             lines.append(f"  - {message}")
@@ -366,4 +372,3 @@ __all__ = [
     "build_summary_md",
     "write_summary_md",
 ]
-

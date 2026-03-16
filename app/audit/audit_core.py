@@ -196,7 +196,7 @@ def _run_audit_impl(run_config: RunConfig, run_paths: RunPaths | None = None) ->
 
             run_result.diff_entries = diff_entries
 
-        _write_reports(
+        _write_reports_best_effort(
             run_result=run_result,
             master_log_lines=master_log_lines,
         )
@@ -247,10 +247,34 @@ def _write_reports(run_result: RunResult, master_log_lines: list[str]) -> None:
 
 
 def _write_reports_best_effort(run_result: RunResult, master_log_lines: list[str]) -> None:
+    wrote_master_log = False
+
     try:
-        _write_reports(run_result=run_result, master_log_lines=master_log_lines)
-    except Exception as report_exc:
-        _log_master(master_log_lines, f"warning: report_write_failed={report_exc}")
+        write_master_log(run_result.run_paths.master_log_path, master_log_lines)
+        wrote_master_log = True
+    except Exception:
+        wrote_master_log = False
+
+    report_steps: list[tuple[str, callable]] = [
+        ("summary_json", lambda: write_summary_json(run_result)),
+        ("summary_md", lambda: write_summary_md(run_result)),
+        ("ai_ready", lambda: write_ai_ready(run_result)),
+        ("top_errors", lambda: write_top_errors(run_result)),
+        ("file_detail_logs", lambda: write_file_detail_logs(run_result)),
+        ("all_scan_logs", lambda: write_all_scan_logs(run_result)),
+        ("all_logs", lambda: write_all_logs(run_result)),
+    ]
+
+    had_report_warning = False
+
+    for report_name, writer in report_steps:
+        try:
+            writer()
+        except Exception as report_exc:
+            had_report_warning = True
+            _log_master(master_log_lines, f"warning: report_write_failed[{report_name}]={report_exc}")
+
+    if had_report_warning or not wrote_master_log:
         try:
             write_master_log(run_result.run_paths.master_log_path, master_log_lines)
         except Exception:
