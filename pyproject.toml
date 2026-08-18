@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gf-audit"
-version = "0.1.0"
+dynamic = ["version"]
 description = "GUI and CLI audit tool for GF grammars"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -29,6 +29,9 @@ gf-audit-cli = "app.main_cli:main"
 
 [project.gui-scripts]
 gf-audit-gui = "app.main_gui:main"
+
+[tool.hatch.version]
+path = "app/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]

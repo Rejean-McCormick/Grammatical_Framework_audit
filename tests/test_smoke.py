@@ -31,56 +31,98 @@ def _make_run_result(*, fail_count: int) -> SimpleNamespace:
     )
 
 
-def test_main_cli_success_path_returns_zero(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_cli_success_path_returns_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     captured: dict[str, object] = {}
+    expected_run_config = SimpleNamespace()
+    expected_run_result = _make_run_result(fail_count=0)
 
-    monkeypatch.setattr(main_cli, "parse_args", lambda argv=None: SimpleNamespace())
-    monkeypatch.setattr(main_cli, "build_cli_run_config", lambda args: SimpleNamespace())
+    monkeypatch.setattr(
+        main_cli,
+        "parse_args",
+        lambda argv=None: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        main_cli,
+        "build_cli_run_config",
+        lambda args: expected_run_config,
+    )
 
-    def fake_run_audit(run_config):
+    def fake_run_audit(run_config: object) -> SimpleNamespace:
         captured["run_config"] = run_config
-        return _make_run_result(fail_count=0)
+        return expected_run_result
 
-    def fake_write_reports(run_result):
-        captured["write_reports_called"] = True
-        captured["written_run_result"] = run_result
-
-    def fake_print_run_summary(run_result):
-        captured["print_run_summary_called"] = True
+    def fake_print_run_summary(run_result: object) -> None:
+        captured["printed_run_result"] = run_result
 
     monkeypatch.setattr(main_cli, "run_audit", fake_run_audit)
-    monkeypatch.setattr(main_cli, "write_reports", fake_write_reports)
-    monkeypatch.setattr(main_cli, "print_run_summary", fake_print_run_summary)
+    monkeypatch.setattr(
+        main_cli,
+        "print_run_summary",
+        fake_print_run_summary,
+    )
 
     exit_code = main_cli.main([])
 
     assert exit_code == main_cli.EXIT_OK
-    assert captured["write_reports_called"] is True
-    assert captured["print_run_summary_called"] is True
-    assert captured["run_config"] is not None
-    assert captured["written_run_result"].fail_count == 0
+    assert captured["run_config"] is expected_run_config
+    assert captured["printed_run_result"] is expected_run_result
 
 
-def test_main_cli_failure_path_returns_one(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(main_cli, "parse_args", lambda argv=None: SimpleNamespace())
-    monkeypatch.setattr(main_cli, "build_cli_run_config", lambda args: SimpleNamespace())
-    monkeypatch.setattr(main_cli, "run_audit", lambda run_config: _make_run_result(fail_count=2))
-    monkeypatch.setattr(main_cli, "write_reports", lambda run_result: None)
-    monkeypatch.setattr(main_cli, "print_run_summary", lambda run_result: None)
+def test_main_cli_failure_path_returns_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected_run_result = _make_run_result(fail_count=2)
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        main_cli,
+        "parse_args",
+        lambda argv=None: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        main_cli,
+        "build_cli_run_config",
+        lambda args: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        main_cli,
+        "run_audit",
+        lambda run_config: expected_run_result,
+    )
+
+    def fake_print_run_summary(run_result: object) -> None:
+        captured["printed_run_result"] = run_result
+
+    monkeypatch.setattr(
+        main_cli,
+        "print_run_summary",
+        fake_print_run_summary,
+    )
 
     exit_code = main_cli.main([])
 
     assert exit_code == main_cli.EXIT_AUDIT_FAILURES
+    assert captured["printed_run_result"] is expected_run_result
 
 
 def test_main_cli_runtime_error_returns_runtime_code(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr(main_cli, "parse_args", lambda argv=None: SimpleNamespace())
-    monkeypatch.setattr(main_cli, "build_cli_run_config", lambda args: SimpleNamespace())
+    monkeypatch.setattr(
+        main_cli,
+        "parse_args",
+        lambda argv=None: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        main_cli,
+        "build_cli_run_config",
+        lambda args: SimpleNamespace(),
+    )
 
-    def fake_run_audit(run_config):
+    def fake_run_audit(run_config: object) -> SimpleNamespace:
         raise RuntimeError("boom")
 
     monkeypatch.setattr(main_cli, "run_audit", fake_run_audit)
@@ -88,12 +130,16 @@ def test_main_cli_runtime_error_returns_runtime_code(
     exit_code = main_cli.main([])
 
     captured = capsys.readouterr()
+
     assert exit_code == main_cli.EXIT_RUNTIME_ERROR
     assert "ERROR: boom" in captured.err
 
 
 def test_determine_exit_code_matches_fail_count() -> None:
-    assert main_cli.determine_exit_code(_make_run_result(fail_count=0)) == main_cli.EXIT_OK
+    assert (
+        main_cli.determine_exit_code(_make_run_result(fail_count=0))
+        == main_cli.EXIT_OK
+    )
     assert (
         main_cli.determine_exit_code(_make_run_result(fail_count=1))
         == main_cli.EXIT_AUDIT_FAILURES

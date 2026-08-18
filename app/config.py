@@ -3,13 +3,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Final
 
+from . import __app_name__, __version__
+
 
 # ---------------------------------------------------------------------------
 # Application
 # ---------------------------------------------------------------------------
 
-APP_NAME: Final[str] = "gf-audit"
-APP_VERSION: Final[str] = "1.0.0"
+APP_NAME: Final[str] = __app_name__
+APP_VERSION: Final[str] = __version__
 
 
 # ---------------------------------------------------------------------------
@@ -33,7 +35,9 @@ DEFAULT_TIMEOUT_SEC: Final[int] = 60
 DEFAULT_MAX_FILES: Final[int] = 0
 
 DEFAULT_INCLUDE_REGEX: Final[str] = r"^[A-Z][A-Za-z0-9_]*\.gf$"
-DEFAULT_EXCLUDE_REGEX: Final[str] = r"( - Copie\.gf$|\.bak\.gf$|\.tmp\.gf$|\.disabled\.gf$|\s)"
+DEFAULT_EXCLUDE_REGEX: Final[str] = (
+    r"( - Copie\.gf$|\.bak\.gf$|\.tmp\.gf$|\.disabled\.gf$|\s)"
+)
 
 DEFAULT_KEEP_OK_DETAILS: Final[bool] = False
 DEFAULT_DIFF_PREVIOUS: Final[bool] = True

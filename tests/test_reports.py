@@ -304,7 +304,7 @@ def test_write_ai_ready_writes_ai_ready_packet_with_inline_evidence(tmp_path: Pa
     assert "runtime_str_match=2" in content
     assert "trailing_spaces=1" in content
     assert "- `lib/src/albanian/MorphoSqi.gf`: compile OK, scan hits ->" in content
-    assert "lib/src/albanian/NounSqi.gf" not in content
+    assert "- `lib/src/albanian/NounSqi.gf`: compile OK, scan hits ->" not in content
 
     assert "FAIL -> OK" in content
     assert "still FAIL" not in content
@@ -380,7 +380,7 @@ def test_write_ai_ready_single_failure_is_not_duplicated(tmp_path: Path) -> None
 
     content = write_ai_ready(run_result).read_text(encoding="utf-8")
 
-    assert written_name := run_result.run_paths.ai_ready_path.name
+    written_name = run_result.run_paths.ai_ready_path.name
     assert written_name == "AI_READY.md"
 
     assert "## Diagnosis Snapshot" in content

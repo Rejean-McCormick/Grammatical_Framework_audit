@@ -67,6 +67,8 @@ def _build_ai_ready_text(run_result: RunResult) -> str:
     lines.append(f"- top_error: `{primary_top_error_text}`")
     lines.append("")
 
+    lines.extend(_format_top_errors(top_errors))
+
     if primary_failure is not None:
         lines.append("## Diagnosis Snapshot")
         lines.append(_build_diagnosis_summary(primary_failure, primary_top_error_text))
@@ -329,6 +331,16 @@ def _normalize_top_errors(top_errors: object) -> list[tuple[str, int]]:
             normalized.append((message, count))
 
     return sorted(normalized, key=lambda item: (-item[1], item[0].lower()))
+
+
+def _format_top_errors(top_errors: list[tuple[str, int]]) -> list[str]:
+    if not top_errors:
+        return []
+
+    lines = ["## Top Errors"]
+    lines.extend(f"- `{message}` (count: `{count}`)" for message, count in top_errors)
+    lines.append("")
+    return lines
 
 
 def _collect_detail_paths(file_results: Iterable[FileResult]) -> list[str]:

@@ -195,6 +195,15 @@ def _process_gf_line(line: str, in_block_comment: bool) -> tuple[str, str, bool]
                 index += 2
                 continue
 
+            # GF permits a literal quote inside a string as a doubled quote.
+            # Preserve it in the comment-stripped representation, but mask it
+            # completely in the syntax-only representation.
+            if ch == '"' and next_ch == '"':
+                keep_chars.extend(['"', '"'])
+                masked_chars.extend([" ", " "])
+                index += 2
+                continue
+
             if ch == '"':
                 in_string = False
                 keep_chars.append('"')
@@ -282,17 +291,21 @@ def _find_runtime_string_match_blocks(
     hits: list[str] = []
     index = 0
 
-    while index < len(lines_no_comments):
-        line = lines_no_comments[index]
+    while index < len(lines_no_strings):
+        line = lines_no_strings[index]
         if not rx_case.search(line):
             index += 1
             continue
 
         head = line
         end_head = index
-        while end_head + 1 < len(lines_no_comments) and not rx_head_has_of_brace.search(head) and len(head) < 800:
+        while (
+            end_head + 1 < len(lines_no_strings)
+            and not rx_head_has_of_brace.search(head)
+            and len(head) < 800
+        ):
             end_head += 1
-            head += " " + re.sub(r"\s+", " ", lines_no_comments[end_head])
+            head += " " + re.sub(r"\s+", " ", lines_no_strings[end_head])
 
         if not (rx_head_has_of_brace.search(head) and rx_head_has_dot_s.search(head)):
             index += 1
@@ -322,8 +335,8 @@ def _find_untyped_blocks_with_str_patterns(
     hits: list[str] = []
     index = 0
 
-    while index < len(lines_no_comments):
-        if not start_rx.search(lines_no_comments[index]):
+    while index < len(lines_no_strings):
+        if not start_rx.search(lines_no_strings[index]):
             index += 1
             continue
 

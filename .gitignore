@@ -53,4 +53,5 @@ artifacts/
 *.transcript.txt
 
 # Optional local app state
-state.local.json
+state.local.json
+GitSink.bat
